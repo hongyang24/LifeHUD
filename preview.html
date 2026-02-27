@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>人生导航仪 HUD - 预览</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+  <body class="bg-slate-950 text-slate-300">
+    <div id="root"></div>
+    <script type="module">
+      import React from 'https://esm.sh/react@18'
+      import { createRoot } from 'https://esm.sh/react-dom@18/client'
+      const App = () =>
+        {
+          const read = () => {
+            try { return JSON.parse(localStorage.getItem('lifehud.tasks') || '[]') } catch { return [] }
+          }
+          const [getTasks, setTasks] = React.useState(read())
+          const [title, setTitle] = React.useState('')
+          const [type, setType] = React.useState('主线')
+          const readActive = () => {
+            try { return JSON.parse(localStorage.getItem('lifehud.active') || '{"activeTaskId":null,"startTime":null}') } catch { return { activeTaskId:null, startTime:null } }
+          }
+          const [activeTaskId, setActiveTaskId] = React.useState(readActive().activeTaskId)
+          const [startTime, setStartTime] = React.useState(readActive().startTime)
+          const [now, setNow] = React.useState(Date.now())
+          const [isSettling, setIsSettling] = React.useState(false)
+          const [bodyState, setBodyState] = React.useState(null)
+          const [wisdomType, setWisdomType] = React.useState('')
+          const [wisdomQuote, setWisdomQuote] = React.useState('')
+          const [charisma, setCharisma] = React.useState('')
+          const [moods, setMoods] = React.useState([])
+          const [moneyDelta, setMoneyDelta] = React.useState('')
+          React.useEffect(() => {
+            localStorage.setItem('lifehud.tasks', JSON.stringify(getTasks))
+          }, [getTasks])
+          React.useEffect(() => {
+            localStorage.setItem('lifehud.active', JSON.stringify({ activeTaskId, startTime }))
+          }, [activeTaskId, startTime])
+          React.useEffect(() => {
+            const id = setInterval(() => setNow(Date.now()), 1000)
+            return () => clearInterval(id)
+          }, [])
+          const onAdd = () => {
+            const t = title.trim()
+            if (!t) return
+            const item = { id: Date.now(), title: t, type, status: '待启动' }
+            setTasks(prev => [item, ...prev])
+            setTitle('')
+          }
+          const startTask = id => {
+            setTasks(prev => prev.map(it => it.id === id ? { ...it, status: '进行中' } : it))
+            setActiveTaskId(id)
+            setStartTime(Date.now())
+          }
+          const formatElapsed = ms => {
+            if (!ms || ms < 0) return '00:00:00'
+            const s = Math.floor(ms/1000)
+            const hh = String(Math.floor(s/3600)).padStart(2,'0')
+            const mm = String(Math.floor((s%3600)/60)).padStart(2,'0')
+            const ss = String(s%60).padStart(2,'0')
+            return `${hh}:${mm}:${ss}`
+          }
+          const currentTask = getTasks.find(t => t.id === activeTaskId)
+          const elapsed = startTime ? formatElapsed(now - startTime) : null
+          return React.createElement(
+            'div',
+            { className: 'min-h-screen' },
+            React.createElement(
+              'div',
+              { className: 'max-w-2xl mx-auto p-4' },
+              React.createElement(
+                'header',
+                { className: 'py-4' },
+                React.createElement(
+                  'div',
+                  { className: 'font-mono text-sm tracking-tight' },
+                  '[ TERMINAL v1.0 - LIFE_NAVIGATOR ]'
+                ),
+                React.createElement('div', { className: 'border-b border-slate-700 mt-2' })
+              ),
+              currentTask
+                ? React.createElement(
+                    'section',
+                    { className: 'mt-16 flex flex-col items-center text-center gap-8' },
+                    React.createElement('div', { className: 'text-2xl sm:text-3xl text-slate-200' }, `TARGET: `, React.createElement('span', { className: 'font-semibold' }, `[ ${currentTask.title} ]`)),
+                    React.createElement('div', { className: 'font-mono text-3xl sm:text-4xl text-slate-100' }, `ELAPSED: ${elapsed}`),
+                    React.createElement('button', {
+                      onClick: () => {
+                        if (activeTaskId != null) {
+                          setTasks(prev => prev.map(it => it.id === activeTaskId ? { ...it, status: '已结束' } : it))
+                        }
+                        setIsSettling(true)
+                      },
+                      className: 'mt-8 border-2 border-amber-500 text-amber-400 hover:bg-amber-500/10 rounded-md px-5 py-3'
+                    }, '结束任务并结算感知'),
+                    isSettling && React.createElement(
+                      'div',
+                      { className: 'fixed inset-0 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center z-50' },
+                      React.createElement(
+                        'div',
+                        { className: 'max-w-2xl w-full mx-4 border border-slate-700 rounded-lg bg-slate-900/80 p-6 max-h-[80vh] overflow-y-auto' },
+                        React.createElement('div', { className: 'text-slate-200 font-mono text-sm mb-4' }, '[ 结算档案 ]'),
+                        React.createElement(
+                          'div',
+                          { className: 'space-y-3' },
+                          React.createElement(
+                            'div',
+                            { className: 'border border-slate-800 rounded-md p-3' },
+                            React.createElement('div', { className: 'text-slate-300 text-sm mb-2' }, '[ 躯体状态 ]'),
+                            React.createElement(
+                              'div',
+                              { className: 'grid grid-cols-5 gap-2' },
+                              React.createElement('button', {
+                                onClick: () => setBodyState('枯竭'),
+                                className: `h-10 rounded-md text-xs bg-red-900 text-red-200 ${bodyState==='枯竭' ? 'ring-2 ring-cyan-400 animate-pulse' : 'ring-1 ring-slate-700'}`
+                              }, '枯竭'),
+                              React.createElement('button', {
+                                onClick: () => setBodyState('疲劳'),
+                                className: `h-10 rounded-md text-xs bg-orange-900 text-orange-200 ${bodyState==='疲劳' ? 'ring-2 ring-cyan-400 animate-pulse' : 'ring-1 ring-slate-700'}`
+                              }, '疲劳'),
+                              React.createElement('button', {
+                                onClick: () => setBodyState('平稳'),
+                                className: `h-10 rounded-md text-xs bg-slate-800 text-slate-200 ${bodyState==='平稳' ? 'ring-2 ring-cyan-400 animate-pulse' : 'ring-1 ring-slate-700'}`
+                              }, '平稳'),
+                              React.createElement('button', {
+                                onClick: () => setBodyState('充沛'),
+                                className: `h-10 rounded-md text-xs bg-emerald-900 text-emerald-200 ${bodyState==='充沛' ? 'ring-2 ring-cyan-400 animate-pulse' : 'ring-1 ring-slate-700'}`
+                              }, '充沛'),
+                              React.createElement('button', {
+                                onClick: () => setBodyState('巅峰'),
+                                className: `h-10 rounded-md text-xs bg-cyan-900 text-cyan-200 ${bodyState==='巅峰' ? 'ring-2 ring-cyan-400 animate-pulse' : 'ring-1 ring-slate-700'}`
+                              }, '巅峰')
+                            )
+                          ),
+                          React.createElement(
+                            'div',
+                            { className: 'border border-slate-800 rounded-md p-3' },
+                            React.createElement('div', { className: 'text-slate-300 text-sm mb-2' }, '[ 智慧视域 ]'),
+                            React.createElement(
+                              'div',
+                              { className: 'flex flex-col sm:flex-row gap-2' },
+                              React.createElement(
+                                'select',
+                                {
+                                  value: wisdomType,
+                                  onChange: e => setWisdomType(e.target.value),
+                                  className: 'bg-slate-900 text-slate-300 border border-slate-700/60 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-cyan-500'
+                                },
+                                React.createElement('option', { value: '' }, '选择视域分类'),
+                                React.createElement('option', { value: '逻辑构建' }, '逻辑构建'),
+                                React.createElement('option', { value: '系统洞察' }, '系统洞察'),
+                                React.createElement('option', { value: '人道共情' }, '人道共情'),
+                                React.createElement('option', { value: '自省觉察' }, '自省觉察')
+                              ),
+                              React.createElement('input', {
+                                value: wisdomQuote,
+                                onChange: e => setWisdomQuote(e.target.value.slice(0,20)),
+                                maxLength: 20,
+                                placeholder: '在此记录一行智慧金句 (20字以内)',
+                                className: 'flex-1 bg-slate-900 text-slate-300 placeholder-slate-500 border border-slate-700/60 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-cyan-500'
+                              })
+                            )
+                          ),
+                          React.createElement(
+                            'div',
+                            { className: 'border border-slate-800 rounded-md p-3' },
+                            React.createElement('div', { className: 'text-slate-300 text-sm mb-2' }, '[ 场能连接 ]'),
+                            React.createElement(
+                              'div',
+                              { className: 'grid grid-cols-2 sm:grid-cols-4 gap-2' },
+                              ...['独处 (自洽)','对话 (被看见)','共鸣 (相互启发)','领导 (场能辐射)'].map(c =>
+                                React.createElement('button', {
+                                  key: c,
+                                  onClick: () => setCharisma(charisma === c ? '' : c),
+                                  className: `h-10 rounded-md text-xs ${charisma===c ? 'ring-2 ring-cyan-400 animate-pulse bg-cyan-900 text-cyan-200' : 'ring-1 ring-slate-700 bg-slate-800 text-slate-200'}`
+                                }, c)
+                              )
+                            )
+                          ),
+                          React.createElement(
+                            'div',
+                            { className: 'border border-slate-800 rounded-md p-3' },
+                            React.createElement('div', { className: 'text-slate-300 text-sm mb-2' }, '[ 情绪锚点 ]'),
+                            React.createElement(
+                              'div',
+                              { className: 'grid grid-cols-1 sm:grid-cols-2 gap-3' },
+                              React.createElement(
+                                'div',
+                                { className: 'space-y-2' },
+                                React.createElement('div', { className: 'text-xs text-emerald-300' }, '[ 需求得到满足 ]'),
+                                React.createElement(
+                                  'div',
+                                  { className: 'max-h-52 overflow-auto flex flex-wrap gap-2' },
+                                  ...['兴奋','喜悦','欣喜','甜蜜','精力充沛','兴高采烈','感激','感动','乐观','自信','振作','振奋','开心','高兴','快乐','愉快','幸福','陶醉','满足','欣慰','心旷神怡','喜出望外','平静','自在','舒适','放松','踏实','安全','温暖','放心','无忧无虑'].map(w => {
+                                    const active = moods.includes(w)
+                                    return React.createElement('button', {
+                                      key: w,
+                                      onClick: () => setMoods(prev => active ? prev.filter(x=>x!==w) : [...prev,w]),
+                                      className: `px-2 py-1 rounded-md text-xs ${active ? 'ring-2 ring-cyan-400 animate-pulse bg-emerald-900 text-emerald-200' : 'ring-1 ring-slate-700 bg-emerald-950 text-emerald-300'}`
+                                    }, w)
+                                  })
+                                )
+                              ),
+                              React.createElement(
+                                'div',
+                                { className: 'space-y-2' },
+                                React.createElement('div', { className: 'text-xs text-amber-300' }, '[ 需求未得到满足 ]'),
+                                React.createElement(
+                                  'div',
+                                  { className: 'max-h-52 overflow-auto flex flex-wrap gap-2' },
+                                  ...['害怕','担心','焦虑','忧虑','着急','紧张','心神不宁','心烦意乱','忧伤','沮丧','灰心','气馁','泄气','绝望','伤感','凄凉','悲伤','恼怒','愤怒','烦恼','苦恼','生气','厌烦','不满','不快','不耐烦','不高兴','震惊','失望','困惑','茫然','寂寞','孤独','郁闷','难过','悲观','沉重','麻木','精疲力尽','委靡不振','疲惫不堪','昏昏欲睡','无精打采','尴尬','惭愧','内疚','妒忌','遗憾','不舒服'].map(w => {
+                                    const active = moods.includes(w)
+                                    return React.createElement('button', {
+                                      key: w,
+                                      onClick: () => setMoods(prev => active ? prev.filter(x=>x!==w) : [...prev,w]),
+                                      className: `px-2 py-1 rounded-md text-xs ${active ? 'ring-2 ring-cyan-400 animate-pulse bg-amber-900 text-amber-200' : 'ring-1 ring-slate-700 bg-amber-950 text-amber-300'}`
+                                    }, w)
+                                  })
+                                )
+                              )
+                            )
+                          ),
+                          React.createElement(
+                            'div',
+                            { className: 'border border-slate-800 rounded-md p-3' },
+                            React.createElement('div', { className: 'text-slate-300 text-sm mb-2' }, '[ 现实回报 ]'),
+                            React.createElement('input', {
+                              value: moneyDelta,
+                              onChange: e => setMoneyDelta(e.target.value.replace(/[^\d-]/g,'')),
+                              placeholder: '筹码增量',
+                              className: 'bg-slate-900 text-slate-300 border border-slate-700/60 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-cyan-500 w-full'
+                            })
+                          )
+                        ),
+                        React.createElement(
+                          'div',
+                          { className: 'mt-6 flex justify-end' },
+                          React.createElement(
+                            'button',
+                            {
+                              onClick: () => {
+                                try {
+                                  const raw = localStorage.getItem('lifehud.logs')
+                                  const logs = raw ? JSON.parse(raw) : []
+                                  const endTime = Date.now()
+                                  const currentTask = getTasks.find(t => t.id === activeTaskId)
+                                  logs.push({
+                                    taskId: activeTaskId,
+                                    title: currentTask && currentTask.title,
+                                    type: currentTask && currentTask.type,
+                                    startTime,
+                                    endTime,
+                                    elapsedMs: startTime ? endTime - startTime : 0,
+                                    bodyState,
+                                    wisdomType,
+                                    wisdomQuote,
+                                    charisma,
+                                    moods,
+                                    moneyDelta: Number(moneyDelta) || 0
+                                  })
+                                  localStorage.setItem('lifehud.logs', JSON.stringify(logs))
+                                } catch {}
+                                setActiveTaskId(null); setStartTime(null); setIsSettling(false)
+                                setBodyState(null); setWisdomType(''); setWisdomQuote(''); setCharisma(''); setMoods([]); setMoneyDelta('')
+                              },
+                              className: 'border-2 border-cyan-500 text-cyan-300 hover:bg-cyan-500/10 rounded-md px-4 py-2'
+                            },
+                            '确认存档'
+                          )
+                        )
+                      )
+                    )
+                  )
+                : React.createElement(
+                    'section',
+                    { className: 'mt-4 space-y-3' },
+                    React.createElement(
+                      'div',
+                      { className: 'flex gap-2' },
+                      React.createElement('input', {
+                        value: title,
+                        onChange: e => setTitle(e.target.value),
+                        placeholder: '任务描述',
+                        className: 'flex-1 bg-slate-900 text-slate-300 placeholder-slate-500 border border-slate-700/60 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-slate-600'
+                      }),
+                      React.createElement(
+                        'select',
+                        {
+                          value: type,
+                          onChange: e => setType(e.target.value),
+                          className: 'bg-slate-900 text-slate-300 border border-slate-700/60 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-slate-600'
+                        },
+                        React.createElement('option', { value: '主线' }, '主线剧情'),
+                        React.createElement('option', { value: '支线' }, '支线任务'),
+                        React.createElement('option', { value: '日常' }, '日常副本')
+                      ),
+                      React.createElement(
+                        'button',
+                        { onClick: onAdd, className: 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 rounded-md px-3 py-2' },
+                        '录入'
+                      )
+                    ),
+                    React.createElement(
+                      'div',
+                      { className: 'border border-slate-800 rounded-md' },
+                      React.createElement('div', { className: 'px-3 py-2 text-xs text-slate-400 border-b border-slate-800' }, '看板'),
+                      (() => {
+                        const waiting = getTasks.filter(t => t.status === '待启动')
+                        return waiting.length
+                          ? React.createElement(
+                              'ul',
+                              { className: 'divide-y divide-slate-800' },
+                              ...waiting.map(item =>
+                                React.createElement(
+                                  'li',
+                                  { key: item.id, className: 'px-3 py-3 flex items-center gap-3' },
+                                  React.createElement('span', { className: 'text-xs text-slate-400 shrink-0' }, `[ ${item.type} ]`),
+                                  React.createElement('span', { className: 'text-slate-200 flex-1 truncate' }, item.title),
+                                  React.createElement(
+                                    'button',
+                                    { onClick: () => startTask(item.id), className: 'bg-cyan-600 hover:bg-cyan-500 text-slate-900 rounded-md px-3 py-1 text-sm' },
+                                    '启动'
+                                  )
+                                )
+                              )
+                            )
+                          : React.createElement('div', { className: 'px-3 py-4 text-sm text-slate-500' }, '[ 暂无待处理视域 ]')
+                      })()
+                    )
+                  )
+            )
+          )
+        }
+      createRoot(document.getElementById('root')).render(React.createElement(App))
+    </script>
+  </body>
+  </html>
