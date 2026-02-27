@@ -32,6 +32,52 @@
           const [charisma, setCharisma] = React.useState('')
           const [moods, setMoods] = React.useState([])
           const [moneyDelta, setMoneyDelta] = React.useState('')
+          const [glitchTriggered, setGlitchTriggered] = React.useState(false)
+          const [glitchText, setGlitchText] = React.useState('')
+          const [glitchResponse, setGlitchResponse] = React.useState('')
+          const [entropy, setEntropy] = React.useState(0)
+          
+          const calculateEntropy = () => {
+            try {
+              const raw = localStorage.getItem('lifehud.logs')
+              const arr = raw ? JSON.parse(raw) : []
+              arr.sort((a,b) => (b.endTime||0) - (a.endTime||0))
+              const last = arr.slice(0,5)
+              if (last.length === 0) { setEntropy(0); return }
+              const typeCount = {}; const titleCount = {}
+              last.forEach(l => { if (l && l.type) typeCount[l.type]=(typeCount[l.type]||0)+1; if (l && l.title) titleCount[l.title]=(titleCount[l.title]||0)+1 })
+              const maxType = Object.values(typeCount).reduce((a,b)=>Math.max(a,b),0)
+              const maxTitle = Object.values(titleCount).reduce((a,b)=>Math.max(a,b),0)
+              let score = 0; if (maxType>=3) score += (maxType-2)*25; if (maxTitle>=2) score += (maxTitle-1)*25
+              const hasFix = last.some(l => l.type === 'DIVERGE_FIX')
+              if (hasFix) score = Math.floor(score * 0.6)
+              score = Math.max(0, Math.min(100, score))
+              setEntropy(score)
+            } catch { setEntropy(0) }
+          }
+          
+          React.useEffect(() => {
+            calculateEntropy()
+          }, [getTasks, isSettling])
+
+          const pool = [
+            '感知并放松你此时此刻紧绷的肩膀',
+            '进行 3 次极慢的深呼吸，感受空气进入肺底',
+            '将视线移开屏幕，聚焦于 5 米外的一个固定点',
+            '感受喉咙的干渴程度，若有需要，起去喝一口水',
+            '闭眼 5 秒，分辨出此时环境背景中最小的那个声音',
+            '在视线范围内迅速找到 3 个蓝色的物体',
+            '感受屁股与椅面、脚底与地面的压力分配',
+            '用手背感受一下你面前空气的温度',
+            '用你的非惯用手调整一下鼠标或水杯的位置',
+            '停下手中的字，在脑中默念刚才想的那句话，但是倒着念一遍',
+            '保持头不动，用余光扫视你左右两侧的最边缘景物',
+            '用手指轻抚你桌面上离你最近的一个不同材质的物体',
+            '默念一句：“我正在玩一个关于当前任务的模拟游戏。”',
+            '想象 10 年后的你正在看现在的这个瞬间，他会说什么？',
+            '假设你是一个潜伏在天花板上的观察者，观察正在桌前工作的那个你',
+            '问自己：目前的忙碌是在创造秩序，还是在逃避混乱？'
+          ]
           React.useEffect(() => {
             localStorage.setItem('lifehud.tasks', JSON.stringify(getTasks))
           }, [getTasks])
@@ -42,6 +88,95 @@
             const id = setInterval(() => setNow(Date.now()), 1000)
             return () => clearInterval(id)
           }, [])
+          const [echoData, setEchoData] = React.useState(null)
+          const [showEchoOverlay, setShowEchoOverlay] = React.useState(false)
+          const [echoResponse, setEchoResponse] = React.useState('')
+          const [divergeMode, setDivergeMode] = React.useState(false)
+          const [divergeTask, setDivergeTask] = React.useState('')
+          const divergePool = [
+            '起身走向离你最近的一扇窗户，凝视远方 60 秒',
+            '寻找一个表面粗糙的物体（如砖墙、木头、石块），用指尖感受其纹理 30 秒',
+            '原地进行 5 个深蹲或一次长达 30 秒的拉伸',
+            '寻找并观察房间内光线落下的边缘，拍摄一张光影对比最强烈的照片',
+            '缓慢喝下一杯 200ml 的温水或冰水，感受液体经过食道的完整路径',
+            '去寻找一种非办公环境的气味（如茶叶、香水、调料、甚至是一本书的味道）',
+            '用力摩擦双手直到发热，然后将掌心覆盖在紧闭的双眼上',
+            '用你的非惯用手在纸上（或画板上）画出一个完美的圆',
+            '打开窗户或走出门，数出你看到的第 7 个移动物体是什么颜色',
+            '闭上眼，尝试识别出当前环境中三个不同距离的声源',
+            '深呼吸，告诉自己：“刚才那个忙碌的人不是我，我只是一个暂住在在这个身体里的观察者。”',
+            '对着一件毫无意义的办公用品（如订书机、回形针）发呆 30 秒，并发现它的一个“美学特征”'
+          ]
+          
+          React.useEffect(() => {
+            if (!activeTaskId || isSettling || divergeMode) return
+            const checkId = setInterval(() => {
+              const durationMin = (Date.now() - startTime) / 60000
+              const entropyHigh = entropy > 85
+              if (durationMin > 90 || entropyHigh) {
+                const t = divergePool[Math.floor(Math.random() * divergePool.length)]
+                setDivergeTask(t)
+                setDivergeMode(true)
+              }
+            }, 10000)
+            return () => clearInterval(checkId)
+          }, [activeTaskId, startTime, isSettling, divergeMode, entropy])
+
+          React.useEffect(() => {
+            if (!activeTaskId || isSettling || divergeMode) return
+            const mid = setInterval(() => {
+              const hit = Math.random() < 0.1
+              if (hit) {
+                let cmd = ''
+                let logsArr = []
+                try {
+                  const raw = localStorage.getItem('lifehud.logs')
+                  logsArr = raw ? JSON.parse(raw) : []
+                } catch {}
+
+                if (logsArr.length >= 3 && Math.random() < 0.3) {
+                  const wisdoms = logsArr.filter(l => l.wisdomQuote && l.wisdomQuote.trim())
+                  if (wisdoms.length > 0) {
+                    const pick = wisdoms[Math.floor(Math.random() * wisdoms.length)]
+                    const d = new Date(pick.endTime)
+                    const Y = d.getFullYear()
+                    const M = String(d.getMonth()+1).padStart(2,'0')
+                    const D = String(d.getDate()).padStart(2,'0')
+                    const dateStr = `${Y}-${M}-${D}`
+
+                    setEchoData({ date: dateStr, quote: pick.wisdomQuote })
+                    setShowEchoOverlay(true)
+                    setTimeout(() => setShowEchoOverlay(false), 10000)
+                    setTasks(prev => prev.map(it => it.id === activeTaskId ? { ...it, hasEcho: true } : it))
+                    return 
+                  }
+                }
+
+                cmd = pool[Math.floor(Math.random() * pool.length)]
+                setGlitchTriggered(true)
+                setGlitchText(cmd)
+                setTasks(prev => prev.map(it => it.id === activeTaskId ? { ...it, hasGlitch: true } : it))
+              }
+            }, 60000)
+            return () => clearInterval(mid)
+          }, [activeTaskId, isSettling])
+          const resolveDiverge = () => {
+            try {
+              const raw = localStorage.getItem('lifehud.logs')
+              const logs = raw ? JSON.parse(raw) : []
+              logs.push({
+                taskId: `diverge-${Date.now()}`,
+                title: '路径纠偏',
+                type: 'DIVERGE_FIX',
+                endTime: Date.now(),
+                divergeTask
+              })
+              localStorage.setItem('lifehud.logs', JSON.stringify(logs))
+              calculateEntropy()
+            } catch {}
+            setDivergeMode(false)
+            setDivergeTask('')
+          }
           const onAdd = () => {
             const t = title.trim()
             if (!t) return
@@ -50,11 +185,20 @@
             setTitle('')
           }
           const startTask = id => {
-            setTasks(prev => prev.map(it => it.id === id ? { ...it, status: '进行中' } : it))
+            setTasks(prev => prev.map(it => it.id === id ? { ...it, status: '进行中', hasGlitch: it.hasGlitch ?? false } : it))
             setActiveTaskId(id)
             setStartTime(Date.now())
+            setGlitchTriggered(false)
+            setGlitchText('')
+            setGlitchResponse('')
+            setEchoData(null)
+            setEchoResponse('')
+            setShowEchoOverlay(false)
+            setDivergeMode(false)
+            setDivergeTask('')
           }
           const formatElapsed = ms => {
+            if (divergeMode) return 'ERROR: DIVERGED'
             if (!ms || ms < 0) return '00:00:00'
             const s = Math.floor(ms/1000)
             const hh = String(Math.floor(s/3600)).padStart(2,'0')
@@ -64,12 +208,14 @@
           }
           const currentTask = getTasks.find(t => t.id === activeTaskId)
           const elapsed = startTime ? formatElapsed(now - startTime) : null
+          const sealed = entropy > 70
           return React.createElement(
             'div',
-            { className: 'min-h-screen' },
+            { className: 'min-h-screen', style: { filter: `saturate(${1 - entropy/100})` } },
             React.createElement(
               'div',
               { className: 'max-w-2xl mx-auto p-4' },
+              entropy > 90 ? React.createElement('div', { className: 'fixed inset-0 pointer-events-none z-50', style: { backgroundImage: 'repeating-linear-gradient(0deg, rgba(255,255,255,0.02) 0px, rgba(255,255,255,0.02) 1px, transparent 2px), repeating-linear-gradient(90deg, rgba(255,255,255,0.02) 0px, rgba(255,255,255,0.02) 1px, transparent 2px)', opacity: 0.15 } }) : null,
               React.createElement(
                 'header',
                 { className: 'py-4' },
@@ -85,15 +231,49 @@
                     'section',
                     { className: 'mt-16 flex flex-col items-center text-center gap-8' },
                     React.createElement('div', { className: 'text-2xl sm:text-3xl text-slate-200' }, `TARGET: `, React.createElement('span', { className: 'font-semibold' }, `[ ${currentTask.title} ]`)),
-                    React.createElement('div', { className: 'font-mono text-3xl sm:text-4xl text-slate-100' }, `ELAPSED: ${elapsed}`),
+                    React.createElement('div', { className: `font-mono text-3xl sm:text-4xl ${glitchTriggered ? 'text-fuchsia-300 animate-pulse' : (currentTask.hasEcho ? 'text-slate-100 animate-pulse' : 'text-slate-100')}` }, `ELAPSED: ${elapsed}`),
+                    glitchTriggered && glitchText ? React.createElement('div', { className: 'bg-fuchsia-500/10 text-fuchsia-300 rounded-md px-3 py-2 text-sm font-semibold' }, glitchText) : null,
+                    showEchoOverlay && echoData ? React.createElement(
+                      'div',
+                      { className: 'fixed inset-0 z-40 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm pointer-events-none' },
+                      React.createElement(
+                        'div',
+                        { className: 'text-center p-6 animate-pulse' },
+                        React.createElement('div', { className: 'text-cyan-400 text-sm font-mono mb-4' }, `[ 时空回响：你在 ${echoData.date} 曾觉察到 ]`),
+                        React.createElement('div', { className: 'text-2xl sm:text-3xl font-serif italic text-slate-100' }, `「${echoData.quote}」`)
+                      )
+                    ) : null,
+                    divergeMode ? React.createElement(
+                      'div',
+                      { className: 'fixed inset-0 z-50 bg-red-950/90 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center animate-pulse', style: { background: 'linear-gradient(135deg, #450a0a 0%, #2a0a0a 100%)' } },
+                      React.createElement('div', { className: 'absolute inset-0 opacity-20 pointer-events-none', style: { backgroundImage: 'radial-gradient(circle at 50% 50%, #ef4444 0%, transparent 70%)', animation: 'pulse 4s infinite' } }),
+                      React.createElement('div', { className: 'relative z-10' },
+                        React.createElement('div', { className: 'text-red-500 font-mono text-xl mb-4' }, '[ 警告：意识僵死 / ENTROPY CRITICAL ]'),
+                        React.createElement('div', { className: 'text-red-200 text-3xl font-bold mb-8' }, '系统强制执行偏离协议'),
+                        React.createElement(
+                          'div',
+                          { className: 'max-w-xl bg-red-900/20 border-2 border-red-500/50 rounded-lg p-6 mb-8 mx-auto' },
+                          React.createElement('div', { className: 'text-red-300 text-lg' }, divergeTask)
+                        ),
+                        React.createElement(
+                          'button',
+                          {
+                            onClick: resolveDiverge,
+                            className: 'bg-red-600 hover:bg-red-500 text-white font-bold py-3 px-8 rounded-md shadow-[0_0_15px_rgba(220,38,38,0.5)] transition-all'
+                          },
+                          '已完成偏离'
+                        )
+                      )
+                    ) : null,
                     React.createElement('button', {
                       onClick: () => {
+                        if (divergeMode) return
                         if (activeTaskId != null) {
                           setTasks(prev => prev.map(it => it.id === activeTaskId ? { ...it, status: '已结束' } : it))
                         }
                         setIsSettling(true)
                       },
-                      className: 'mt-8 border-2 border-amber-500 text-amber-400 hover:bg-amber-500/10 rounded-md px-5 py-3'
+                      className: `mt-8 border-2 border-amber-500 text-amber-400 rounded-md px-5 py-3 ${divergeMode ? 'opacity-50 cursor-not-allowed' : 'hover:bg-amber-500/10'}`
                     }, '结束任务并结算感知'),
                     isSettling && React.createElement(
                       'div',
@@ -102,6 +282,56 @@
                         'div',
                         { className: 'max-w-2xl w-full mx-4 border border-slate-700 rounded-lg bg-slate-900/80 p-6 max-h-[80vh] overflow-y-auto' },
                         React.createElement('div', { className: 'text-slate-200 font-mono text-sm mb-4' }, '[ 结算档案 ]'),
+                        currentTask && currentTask.hasGlitch ? React.createElement(
+                          'div',
+                          { className: 'border border-fuchsia-500/40 rounded-md p-3 mb-3' },
+                          React.createElement('div', { className: 'text-fuchsia-300 text-sm mb-2' }, '[ 系统监测到视域闪变，你是否察觉并响应？ ]'),
+                          (() => {
+                            const [resp, setResp] = [window.__respState, v => { window.__respState = v }]
+                            if (resp === undefined) window.__respState = ''
+                            return React.createElement(
+                              'div',
+                              { className: 'flex gap-2' },
+                              React.createElement('button', {
+                                onClick: () => setResp('观察到了并执行'),
+                                className: `${(window.__respState||'')==='观察到了并执行' ? 'bg-fuchsia-600/20 text-fuchsia-200 ring-2 ring-fuchsia-400' : 'bg-slate-800 text-slate-300 ring-1 ring-slate-700'} px-3 py-1 text-xs rounded-md`
+                              }, 'A. 观察到了并执行'),
+                              React.createElement('button', {
+                                onClick: () => setResp('观察到了但忽略'),
+                                className: `${(window.__respState||'')==='观察到了但忽略' ? 'bg-fuchsia-600/20 text-fuchsia-200 ring-2 ring-fuchsia-400' : 'bg-slate-800 text-slate-300 ring-1 ring-slate-700'} px-3 py-1 text-xs rounded-md`
+                              }, 'B. 观察到了但忽略'),
+                              React.createElement('button', {
+                                onClick: () => setResp('全然未觉察'),
+                                className: `${(window.__respState||'')==='全然未觉察' ? 'bg-fuchsia-600/20 text-fuchsia-200 ring-2 ring-fuchsia-400' : 'bg-slate-800 text-slate-300 ring-1 ring-slate-700'} px-3 py-1 text-xs rounded-md`
+                              }, 'C. 全然未觉察')
+                            )
+                          })()
+                        ) : null,
+                        currentTask && currentTask.hasEcho ? React.createElement(
+                          'div',
+                          { className: 'border border-cyan-500/40 rounded-md p-3 mb-3' },
+                          React.createElement('div', { className: 'text-cyan-300 text-sm mb-2' }, '[ 历史回响校准 ]'),
+                          (() => {
+                            const [resp, setResp] = [window.__echoResp, v => { window.__echoResp = v }]
+                            if (resp === undefined) window.__echoResp = ''
+                            return React.createElement(
+                              'div',
+                              { className: 'flex gap-2' },
+                              React.createElement('button', {
+                                onClick: () => setResp('正在践行'),
+                                className: `${(window.__echoResp||'')==='正在践行' ? 'bg-cyan-600/20 text-cyan-200 ring-2 ring-cyan-400' : 'bg-slate-800 text-slate-300 ring-1 ring-slate-700'} px-3 py-1 text-xs rounded-md`
+                              }, '正在践行'),
+                              React.createElement('button', {
+                                onClick: () => setResp('已然背离'),
+                                className: `${(window.__echoResp||'')==='已然背离' ? 'bg-cyan-600/20 text-cyan-200 ring-2 ring-cyan-400' : 'bg-slate-800 text-slate-300 ring-1 ring-slate-700'} px-3 py-1 text-xs rounded-md`
+                              }, '已然背离'),
+                              React.createElement('button', {
+                                onClick: () => setResp('有了新诠释'),
+                                className: `${(window.__echoResp||'')==='有了新诠释' ? 'bg-cyan-600/20 text-cyan-200 ring-2 ring-cyan-400' : 'bg-slate-800 text-slate-300 ring-1 ring-slate-700'} px-3 py-1 text-xs rounded-md`
+                              }, '有了新诠释')
+                            )
+                          })()
+                        ) : null,
                         React.createElement(
                           'div',
                           { className: 'space-y-3' },
@@ -189,16 +419,19 @@
                               React.createElement(
                                 'div',
                                 { className: 'space-y-2' },
-                                React.createElement('div', { className: 'text-xs text-emerald-300' }, '[ 需求得到满足 ]'),
+                                React.createElement('div', { className: 'flex items-center gap-2' },
+                                  React.createElement('div', { className: 'text-xs text-emerald-300' }, '[ 需求得到满足 ]'),
+                                  sealed ? React.createElement('div', { className: 'text-[11px] text-slate-400' }, '[ 视域受限 ]') : null
+                                ),
                                 React.createElement(
                                   'div',
                                   { className: 'max-h-52 overflow-auto flex flex-wrap gap-2' },
-                                  ...['兴奋','喜悦','欣喜','甜蜜','精力充沛','兴高采烈','感激','感动','乐观','自信','振作','振奋','开心','高兴','快乐','愉快','幸福','陶醉','满足','欣慰','心旷神怡','喜出望外','平静','自在','舒适','放松','踏实','安全','温暖','放心','无忧无虑'].map(w => {
+                              ...['兴奋','喜悦','欣喜','甜蜜','精力充沛','兴高采烈','感激','感动','乐观','自信','振作','振奋','开心','高兴','快乐','愉快','幸福','陶醉','满足','欣慰','心旷神怡','喜出望外','平静','自在','舒适','放松','踏实','安全','温暖','放心','无忧无虑'].map(w => {
                                     const active = moods.includes(w)
                                     return React.createElement('button', {
                                       key: w,
-                                      onClick: () => setMoods(prev => active ? prev.filter(x=>x!==w) : [...prev,w]),
-                                      className: `px-2 py-1 rounded-md text-xs ${active ? 'ring-2 ring-cyan-400 animate-pulse bg-emerald-900 text-emerald-200' : 'ring-1 ring-slate-700 bg-emerald-950 text-emerald-300'}`
+                                      onClick: () => sealed ? null : setMoods(prev => active ? prev.filter(x=>x!==w) : [...prev,w]),
+                                      className: `px-2 py-1 rounded-md text-xs ${sealed ? 'bg-slate-800 text-slate-400 ring-1 ring-slate-700 cursor-not-allowed' : (active ? 'ring-2 ring-cyan-400 animate-pulse bg-emerald-900 text-emerald-200' : 'ring-1 ring-slate-700 bg-emerald-950 text-emerald-300')}`
                                     }, w)
                                   })
                                 )
@@ -233,8 +466,8 @@
                               className: 'bg-slate-900 text-slate-300 border border-slate-700/60 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-cyan-500 w-full'
                             })
                           )
-                        ),
-                        React.createElement(
+                      ),
+                      React.createElement(
                           'div',
                           { className: 'mt-6 flex justify-end' },
                           React.createElement(
@@ -258,7 +491,11 @@
                                     wisdomQuote,
                                     charisma,
                                     moods,
-                                    moneyDelta: Number(moneyDelta) || 0
+                                    moneyDelta: Number(moneyDelta) || 0,
+                                    hasGlitch: currentTask && currentTask.hasGlitch || false,
+                                    glitchResponse: window.__respState || '',
+                                    hasEcho: currentTask && currentTask.hasEcho || false,
+                                    echoResponse: window.__echoResp || ''
                                   })
                                   localStorage.setItem('lifehud.logs', JSON.stringify(logs))
                                 } catch {}
@@ -300,8 +537,9 @@
                         'button',
                         { onClick: onAdd, className: 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 rounded-md px-3 py-2' },
                         '录入'
-                      )
-                    ),
+                      ),
+                        React.createElement('div', { className: 'ml-auto text-xs text-slate-400 font-mono' }, `ENTROPY: ${String(entropy).padStart(2,'0')}%`)
+                      ),
                     React.createElement(
                       'div',
                       { className: 'border border-slate-800 rounded-md' },
@@ -327,8 +565,43 @@
                               )
                             )
                           : React.createElement('div', { className: 'px-3 py-4 text-sm text-slate-500' }, '[ 暂无待处理视域 ]')
-                      })()
-                    )
+                        })()
+                      ),
+                      React.createElement(
+                        'div',
+                        { className: 'border border-slate-800 rounded-md' },
+                        React.createElement('div', { className: 'px-3 py-2 text-xs text-slate-400 border-b border-slate-800' }, '历史回溯'),
+                        (() => {
+                          const formatDateTime = ms => {
+                            if (!ms) return ''
+                            const d = new Date(ms)
+                            return `${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
+                          }
+                          let logs = []
+                          try { logs = JSON.parse(localStorage.getItem('lifehud.logs') || '[]') } catch {}
+                          logs.sort((a,b) => (b.endTime||0) - (a.endTime||0))
+                          return logs.length
+                            ? React.createElement(
+                                'ul',
+                                { className: 'divide-y divide-slate-800 max-h-60 overflow-auto' },
+                                ...logs.map(lg =>
+                                  React.createElement(
+                                    'li',
+                                    { key: lg.endTime + Math.random(), className: 'px-3 py-3 flex justify-between items-center' },
+                                    React.createElement('span', { className: 'text-slate-300 text-sm truncate flex-1 mr-2' }, lg.title || '未知任务'),
+                                    React.createElement(
+                                      'div',
+                                      { className: 'flex items-center gap-2 shrink-0' },
+                                      lg.hasGlitch ? React.createElement('span', { className: 'text-xs text-fuchsia-400' }, '⚡') : null,
+                                      lg.type === 'DIVERGE_FIX' ? React.createElement('span', { className: 'text-[10px] bg-red-900/50 text-red-300 px-1 rounded border border-red-800' }, '路径纠偏') : null,
+                                      React.createElement('div', { className: 'text-xs text-slate-500' }, formatDateTime(lg.endTime))
+                                    )
+                                  )
+                                )
+                              )
+                            : React.createElement('div', { className: 'px-3 py-4 text-sm text-slate-500' }, '[ 暂无历史记录 ]')
+                        })()
+                      )
                   )
             )
           )

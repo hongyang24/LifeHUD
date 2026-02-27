@@ -34,6 +34,81 @@ export default function App() {
   const [logs, setLogs] = useState([])
   const [adminOpen, setAdminOpen] = useState(false)
   const fileRef = useRef(null)
+  const [glitchTriggered, setGlitchTriggered] = useState(false)
+  const [glitchText, setGlitchText] = useState('')
+  const [glitchResponse, setGlitchResponse] = useState('')
+  const [divergeMode, setDivergeMode] = useState(false)
+  const [divergeTask, setDivergeTask] = useState('')
+  
+  const divergePool = [
+    '起身走向离你最近的一扇窗户，凝视远方 60 秒',
+    '寻找一个表面粗糙的物体（如砖墙、木头、石块），用指尖感受其纹理 30 秒',
+    '原地进行 5 个深蹲或一次长达 30 秒的拉伸',
+    '寻找并观察房间内光线落下的边缘，拍摄一张光影对比最强烈的照片',
+    '缓慢喝下一杯 200ml 的温水或冰水，感受液体经过食道的完整路径',
+    '去寻找一种非办公环境的气味（如茶叶、香水、调料、甚至是一本书的味道）',
+    '用力摩擦双手直到发热，然后将掌心覆盖在紧闭的双眼上',
+    '用你的非惯用手在纸上（或画板上）画出一个完美的圆',
+    '打开窗户或走出门，数出你看到的第 7 个移动物体是什么颜色',
+    '闭上眼，尝试识别出当前环境中三个不同距离的声源',
+    '深呼吸，告诉自己：“刚才那个忙碌的人不是我，我只是一个暂住在在这个身体里的观察者。”',
+    '对着一件毫无意义的办公用品（如订书机、回形针）发呆 30 秒，并发现它的一个“美学特征”'
+  ]
+
+  const [entropy, setEntropy] = useState(0)
+
+  const calculateEntropy = () => {
+    try {
+      const raw = localStorage.getItem('lifehud.logs')
+      const arr = raw ? JSON.parse(raw) : []
+      arr.sort((a,b) => (b.endTime||0) - (a.endTime||0))
+      const last = arr.slice(0,5)
+      if (last.length === 0) { setEntropy(0); return }
+      const typeCount = {}
+      const titleCount = {}
+      last.forEach(l => {
+        if (l.type) typeCount[l.type] = (typeCount[l.type]||0)+1
+        if (l.title) titleCount[l.title] = (titleCount[l.title]||0)+1
+      })
+      const maxType = Object.values(typeCount).reduce((a,b)=>Math.max(a,b),0)
+      const maxTitle = Object.values(titleCount).reduce((a,b)=>Math.max(a,b),0)
+      let score = 0
+      if (maxType >= 3) score += (maxType - 2) * 25
+      if (maxTitle >= 2) score += (maxTitle - 1) * 25
+      
+      // 检查最近是否有路径纠偏
+      const hasFix = last.some(l => l.type === 'DIVERGE_FIX')
+      if (hasFix) score = Math.floor(score * 0.6) // 降低 40%
+
+      score = Math.max(0, Math.min(100, score))
+      setEntropy(score)
+    } catch {
+      setEntropy(0)
+    }
+  }
+
+  useEffect(() => {
+    calculateEntropy()
+  }, [view, isSettling, tasks, logs]) // 增加 logs 依赖
+
+  const glitchPool = [
+    '感知并放松你此时此刻紧绷的肩膀',
+    '进行 3 次极慢的深呼吸，感受空气进入肺底',
+    '将视线移开屏幕，聚焦于 5 米外的一个固定点',
+    '感受喉咙的干渴程度，若有需要，起去喝一口水',
+    '闭眼 5 秒，分辨出此时环境背景中最小的那个声音',
+    '在视线范围内迅速找到 3 个蓝色的物体',
+    '感受屁股与椅面、脚底与地面的压力分配',
+    '用手背感受一下你面前空气的温度',
+    '用你的非惯用手调整一下鼠标或水杯的位置',
+    '停下手中的字，在脑中默念刚才想的那句话，但是倒着念一遍',
+    '保持头不动，用余光扫视你左右两侧的最边缘景物',
+    '用手指轻抚你桌面上离你最近的一个不同材质的物体',
+    '默念一句：“我正在玩一个关于当前任务的模拟游戏。”',
+    '想象 10 年后的你正在看现在的这个瞬间，他会说什么？',
+    '假设你是一个潜伏在天花板上的观察者，观察正在桌前工作的那个你',
+    '问自己：目前的忙碌是在创造秩序，还是在逃避混乱？'
+  ]
 
   useEffect(() => {
     localStorage.setItem('lifehud.tasks', JSON.stringify(tasks))
@@ -60,12 +135,15 @@ export default function App() {
   }
 
   const startTask = (id) => {
-    setTasks(prev => prev.map(it => it.id === id ? { ...it, status: '进行中' } : it))
+    setTasks(prev => prev.map(it => it.id === id ? { ...it, status: '进行中', hasGlitch: it.hasGlitch ?? false } : it))
     setActiveTaskId(id)
     setStartTime(Date.now())
+    setGlitchTriggered(false)
+    setGlitchText('')
   }
 
   const formatElapsed = (ms) => {
+    if (divergeMode) return 'ERROR: DIVERGED'
     if (!ms || ms < 0) return '00:00:00'
     const s = Math.floor(ms / 1000)
     const hh = String(Math.floor(s / 3600)).padStart(2, '0')
@@ -76,6 +154,7 @@ export default function App() {
   const currentTask = tasks.find(t => t.id === activeTaskId)
   const elapsed = startTime ? formatElapsed(now - startTime) : null
   const endTask = () => {
+    if (divergeMode) return
     if (activeTaskId != null) {
       setTasks(prev => prev.map(it => it.id === activeTaskId ? { ...it, status: '已结束' } : it))
     }
@@ -98,7 +177,11 @@ export default function App() {
         wisdomQuote,
         charisma,
         moods,
-        moneyDelta: Number(moneyDelta) || 0
+        moneyDelta: Number(moneyDelta) || 0,
+        hasGlitch: currentTask?.hasGlitch || false,
+        glitchResponse,
+        hasEcho: currentTask?.hasEcho || false,
+        echoResponse
       })
       localStorage.setItem('lifehud.logs', JSON.stringify(logs))
     } catch {}
@@ -111,7 +194,72 @@ export default function App() {
     setCharisma('')
     setMoods([])
     setMoneyDelta('')
+    setGlitchTriggered(false)
+    setGlitchText('')
+    setGlitchResponse('')
+    setEchoData(null)
+    setEchoResponse('')
+    setShowEchoOverlay(false)
+    setDivergeMode(false)
+    setDivergeTask('')
   }
+
+  const [echoData, setEchoData] = useState(null)
+  const [showEchoOverlay, setShowEchoOverlay] = useState(false)
+  const [echoResponse, setEchoResponse] = useState('')
+
+  useEffect(() => {
+    if (!activeTaskId || isSettling || divergeMode) return
+    const checkId = setInterval(() => {
+      const durationMin = (Date.now() - startTime) / 60000
+      const entropyHigh = entropy > 85
+      if (durationMin > 90 || entropyHigh) {
+        const t = divergePool[Math.floor(Math.random() * divergePool.length)]
+        setDivergeTask(t)
+        setDivergeMode(true)
+      }
+    }, 10000)
+    return () => clearInterval(checkId)
+  }, [activeTaskId, startTime, entropy, isSettling, divergeMode])
+
+  useEffect(() => {
+    if (!activeTaskId || isSettling || divergeMode) return
+    const minuteId = setInterval(() => {
+      const hit = Math.random() < 0.1
+      if (hit) {
+        let cmd = ''
+        let logsArr = []
+        try {
+          const raw = localStorage.getItem('lifehud.logs')
+          logsArr = raw ? JSON.parse(raw) : []
+        } catch {}
+
+        if (logsArr.length >= 3 && Math.random() < 0.3) {
+          const wisdoms = logsArr.filter(l => l.wisdomQuote && l.wisdomQuote.trim())
+          if (wisdoms.length > 0) {
+            const pick = wisdoms[Math.floor(Math.random() * wisdoms.length)]
+            const d = new Date(pick.endTime)
+            const Y = d.getFullYear()
+            const M = String(d.getMonth()+1).padStart(2,'0')
+            const D = String(d.getDate()).padStart(2,'0')
+            const dateStr = `${Y}-${M}-${D}`
+            
+            setEchoData({ date: dateStr, quote: pick.wisdomQuote })
+            setShowEchoOverlay(true)
+            setTimeout(() => setShowEchoOverlay(false), 10000)
+            setTasks(prev => prev.map(it => it.id === activeTaskId ? { ...it, hasEcho: true } : it))
+            return 
+          }
+        }
+        
+        cmd = glitchPool[Math.floor(Math.random() * glitchPool.length)]
+        setGlitchTriggered(true)
+        setGlitchText(cmd)
+        setTasks(prev => prev.map(it => it.id === activeTaskId ? { ...it, hasGlitch: true } : it))
+      }
+    }, 60000)
+    return () => clearInterval(minuteId)
+  }, [activeTaskId, isSettling])
 
   useEffect(() => {
     if (view === 'logs') {
@@ -126,6 +274,44 @@ export default function App() {
     }
   }, [view, isSettling])
 
+  const resolveDiverge = () => {
+    // 降低熵值 40% (模拟) -> 实际上是记录一次纠偏，下次计算熵值时会重新计算
+    // 这里我们直接修改 logs，插入一条特殊的纠偏记录，从而影响后续的计算（或者简单地让 entropy 状态暂时减小，但最稳妥是影响计算源）
+    // 为了简化，我们直接修改当前任务状态，并强制让下次 entropy 计算变低可能比较复杂。
+    // 更好的方式：在 logs 里记录这次偏离完成。calculateEntropy 函数可以识别这种记录并给予“奖励”。
+    
+    // 我们约定：type='DIVERGE_FIX' 的记录会大幅降低计算出的熵值
+    try {
+      const raw = localStorage.getItem('lifehud.logs')
+      const logs = raw ? JSON.parse(raw) : []
+      logs.push({
+        taskId: `diverge-${Date.now()}`,
+        title: '路径纠偏',
+        type: 'DIVERGE_FIX',
+        endTime: Date.now(),
+        divergeTask
+      })
+      localStorage.setItem('lifehud.logs', JSON.stringify(logs))
+      
+      // 强制刷新 logs 视图（如果需要）并重新计算 entropy
+      const arr = logs
+      arr.sort((a,b) => (b.endTime||0) - (a.endTime||0))
+      setLogs(arr)
+      
+      // 手动触发一次熵值更新（虽然 useEffect 会监听 tasks，但 logs 变化也需要）
+      // 我们可以把 logs 加入到 calculateEntropy 的依赖或者直接在这里调用
+      // 简单起见，我们重新计算
+      
+      // 临时计算一下
+      const last = arr.slice(0,5)
+      // 如果包含 DIVERGE_FIX，我们给予奖励
+      // 修改 calculateEntropy 逻辑会更好
+    } catch {}
+
+    setDivergeMode(false)
+    setDivergeTask('')
+  }
+
   const formatDateTime = (ms) => {
     if (!ms) return ''
     const d = new Date(ms)
@@ -139,15 +325,14 @@ export default function App() {
 
   const exportArchive = () => {
     try {
-      const nowStr = (() => {
-        const d = new Date()
-        const Y = d.getFullYear()
-        const M = String(d.getMonth()+1).padStart(2,'0')
-        const D = String(d.getDate()).padStart(2,'0')
-        const h = String(d.getHours()).padStart(2,'0')
-        const m = String(d.getMinutes()).padStart(2,'0')
-        return `${Y}${M}${D}_${h}${m}`
-      })()
+      const d = new Date()
+      const Y = d.getFullYear()
+      const M = String(d.getMonth()+1).padStart(2,'0')
+      const D = String(d.getDate()).padStart(2,'0')
+      const h = String(d.getHours()).padStart(2,'0')
+      const m = String(d.getMinutes()).padStart(2,'0')
+      const nowStr = `${Y}${M}${D}_${h}${m}`
+
       const tasksData = JSON.parse(localStorage.getItem('lifehud.tasks') || '[]')
       const logsData = JSON.parse(localStorage.getItem('lifehud.logs') || '[]')
       const data = { tasks: tasksData, logs: logsData }
@@ -193,8 +378,9 @@ export default function App() {
     location.reload()
   }
 
+  const sealed = entropy > 70
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen" style={{ filter: `saturate(${1 - entropy / 100})` }}>
       <div className="max-w-2xl mx-auto p-4">
         <header className="py-4">
           <div className="font-mono text-sm tracking-tight">
@@ -202,6 +388,16 @@ export default function App() {
           </div>
           <div className="border-b border-slate-700 mt-2" />
         </header>
+        {entropy > 90 && (
+          <div
+            className="fixed inset-0 pointer-events-none z-50"
+            style={{
+              backgroundImage:
+                'repeating-linear-gradient(0deg, rgba(255,255,255,0.02) 0px, rgba(255,255,255,0.02) 1px, transparent 2px), repeating-linear-gradient(90deg, rgba(255,255,255,0.02) 0px, rgba(255,255,255,0.02) 1px, transparent 2px)',
+              opacity: 0.15
+            }}
+          />
+        )}
         <div className="mt-2 flex gap-2">
           <button
             onClick={() => setView('terminal')}
@@ -221,12 +417,47 @@ export default function App() {
             <div className="text-2xl sm:text-3xl text-slate-200">
               TARGET: <span className="font-semibold">[ {currentTask.title} ]</span>
             </div>
-            <div className="font-mono text-3xl sm:text-4xl text-slate-100">
+            <div className={`font-mono text-3xl sm:text-4xl ${glitchTriggered ? 'text-fuchsia-300 animate-pulse' : (currentTask.hasEcho ? 'text-slate-100 animate-pulse' : 'text-slate-100')}`}>
               ELAPSED: {elapsed}
             </div>
+            {glitchTriggered && glitchText && (
+              <div className="bg-fuchsia-500/10 text-fuchsia-300 rounded-md px-3 py-2 text-sm font-semibold">
+                {glitchText}
+              </div>
+            )}
+            {showEchoOverlay && echoData && (
+              <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm pointer-events-none">
+                <div className="text-center p-6 animate-pulse">
+                  <div className="text-cyan-400 text-sm font-mono mb-4">[ 时空回响：你在 {echoData.date} 曾觉察到 ]</div>
+                  <div className="text-2xl sm:text-3xl font-serif italic text-slate-100">
+                    「{echoData.quote}」
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            {divergeMode && (
+              <div className="fixed inset-0 z-50 bg-red-950/90 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center animate-pulse" style={{ background: 'linear-gradient(135deg, #450a0a 0%, #2a0a0a 100%)' }}>
+                <div className="absolute inset-0 opacity-20 pointer-events-none" style={{ backgroundImage: 'radial-gradient(circle at 50% 50%, #ef4444 0%, transparent 70%)', animation: 'pulse 4s infinite' }}></div>
+                <div className="relative z-10">
+                  <div className="text-red-500 font-mono text-xl mb-4">[ 警告：意识僵死 / ENTROPY CRITICAL ]</div>
+                  <div className="text-red-200 text-3xl font-bold mb-8">系统强制执行偏离协议</div>
+                  <div className="max-w-xl bg-red-900/20 border-2 border-red-500/50 rounded-lg p-6 mb-8 mx-auto">
+                    <div className="text-red-300 text-lg">{divergeTask}</div>
+                  </div>
+                  <button
+                    onClick={resolveDiverge}
+                    className="bg-red-600 hover:bg-red-500 text-white font-bold py-3 px-8 rounded-md shadow-[0_0_15px_rgba(220,38,38,0.5)] transition-all"
+                  >
+                    已完成偏离
+                  </button>
+                </div>
+              </div>
+            )}
+
             <button
               onClick={endTask}
-              className="mt-8 border-2 border-amber-500 text-amber-400 hover:bg-amber-500/10 rounded-md px-5 py-3"
+              className={`mt-8 border-2 border-amber-500 text-amber-400 rounded-md px-5 py-3 ${divergeMode ? 'opacity-50 cursor-not-allowed' : 'hover:bg-amber-500/10'}`}
             >
               结束任务并结算感知
             </button>
@@ -234,6 +465,56 @@ export default function App() {
               <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center z-50">
                 <div className="max-w-2xl w-full mx-4 border border-slate-700 rounded-lg bg-slate-900/80 p-6 max-h-[80vh] overflow-y-auto">
                   <div className="text-slate-200 font-mono text-sm mb-4">[ 结算档案 ]</div>
+                  {currentTask?.hasGlitch && (
+                    <div className="border border-fuchsia-500/40 rounded-md p-3 mb-3">
+                      <div className="text-fuchsia-300 text-sm mb-2">[ 系统监测到视域闪变，你是否察觉并响应？ ]</div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setGlitchResponse('观察到了并执行')}
+                          className={`px-3 py-1 text-xs rounded-md ${glitchResponse==='观察到了并执行' ? 'bg-fuchsia-600/20 text-fuchsia-200 ring-2 ring-fuchsia-400' : 'bg-slate-800 text-slate-300 ring-1 ring-slate-700'}`}
+                        >
+                          A. 观察到了并执行
+                        </button>
+                        <button
+                          onClick={() => setGlitchResponse('观察到了但忽略')}
+                          className={`px-3 py-1 text-xs rounded-md ${glitchResponse==='观察到了但忽略' ? 'bg-fuchsia-600/20 text-fuchsia-200 ring-2 ring-fuchsia-400' : 'bg-slate-800 text-slate-300 ring-1 ring-slate-700'}`}
+                        >
+                          B. 观察到了但忽略
+                        </button>
+                        <button
+                          onClick={() => setGlitchResponse('全然未觉察')}
+                          className={`px-3 py-1 text-xs rounded-md ${glitchResponse==='全然未觉察' ? 'bg-fuchsia-600/20 text-fuchsia-200 ring-2 ring-fuchsia-400' : 'bg-slate-800 text-slate-300 ring-1 ring-slate-700'}`}
+                        >
+                          C. 全然未觉察
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  {currentTask?.hasEcho && (
+                    <div className="border border-cyan-500/40 rounded-md p-3 mb-3">
+                      <div className="text-cyan-300 text-sm mb-2">[ 历史回响校准 ]</div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setEchoResponse('正在践行')}
+                          className={`px-3 py-1 text-xs rounded-md ${echoResponse==='正在践行' ? 'bg-cyan-600/20 text-cyan-200 ring-2 ring-cyan-400' : 'bg-slate-800 text-slate-300 ring-1 ring-slate-700'}`}
+                        >
+                          正在践行
+                        </button>
+                        <button
+                          onClick={() => setEchoResponse('已然背离')}
+                          className={`px-3 py-1 text-xs rounded-md ${echoResponse==='已然背离' ? 'bg-cyan-600/20 text-cyan-200 ring-2 ring-cyan-400' : 'bg-slate-800 text-slate-300 ring-1 ring-slate-700'}`}
+                        >
+                          已然背离
+                        </button>
+                        <button
+                          onClick={() => setEchoResponse('有了新诠释')}
+                          className={`px-3 py-1 text-xs rounded-md ${echoResponse==='有了新诠释' ? 'bg-cyan-600/20 text-cyan-200 ring-2 ring-cyan-400' : 'bg-slate-800 text-slate-300 ring-1 ring-slate-700'}`}
+                        >
+                          有了新诠释
+                        </button>
+                      </div>
+                    </div>
+                  )}
                   <div className="space-y-3">
                     <div className="border border-slate-800 rounded-md p-3">
                       <div className="text-slate-300 text-sm mb-2">[ 躯体状态 ]</div>
@@ -311,15 +592,18 @@ export default function App() {
                       <div className="text-slate-300 text-sm mb-2">[ 情绪锚点 ]</div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div className="space-y-2">
-                          <div className="text-xs text-emerald-300">[ 需求得到满足 ]</div>
-                          <div className="max-h-52 overflow-auto flex flex-wrap gap-2">
+                      <div className="flex items-center gap-2">
+                        <div className="text-xs text-emerald-300">[ 需求得到满足 ]</div>
+                        {sealed && <div className="text-[11px] text-slate-400">[ 视域受限 ]</div>}
+                      </div>
+                      <div className="max-h-52 overflow-auto flex flex-wrap gap-2">
                             {['兴奋','喜悦','欣喜','甜蜜','精力充沛','兴高采烈','感激','感动','乐观','自信','振作','振奋','开心','高兴','快乐','愉快','幸福','陶醉','满足','欣慰','心旷神怡','喜出望外','平静','自在','舒适','放松','踏实','安全','温暖','放心','无忧无虑'].map(w => {
                               const active = moods.includes(w)
                               return (
                                 <button
                                   key={w}
-                                  onClick={() => setMoods(prev => active ? prev.filter(x=>x!==w) : [...prev,w])}
-                                  className={`px-2 py-1 rounded-md text-xs ${active ? 'ring-2 ring-cyan-400 animate-pulse bg-emerald-900 text-emerald-200' : 'ring-1 ring-slate-700 bg-emerald-950 text-emerald-300'}`}
+                              onClick={() => sealed ? null : setMoods(prev => active ? prev.filter(x=>x!==w) : [...prev,w])}
+                              className={`px-2 py-1 rounded-md text-xs ${sealed ? 'bg-slate-800 text-slate-400 ring-1 ring-slate-700 cursor-not-allowed' : (active ? 'ring-2 ring-cyan-400 animate-pulse bg-emerald-900 text-emerald-200' : 'ring-1 ring-slate-700 bg-emerald-950 text-emerald-300')}`}
                                 >
                                   {w}
                                 </button>
@@ -392,6 +676,9 @@ export default function App() {
               >
                 录入
               </button>
+              <div className="ml-auto text-xs text-slate-400 font-mono">
+                ENTROPY: {String(entropy).padStart(2,'0')}%
+              </div>
             </div>
  
             <div className="border border-slate-800 rounded-md">
@@ -443,7 +730,11 @@ export default function App() {
                           <div className="font-semibold text-slate-100 truncate">{lg.title || '未命名任务'}</div>
                           <div className="text-xs text-slate-400">[ {lg.type || '未知类型'} ]</div>
                         </div>
-                        <div className="text-xs text-slate-500">{formatDateTime(lg.endTime)}</div>
+                        <div className="flex items-center gap-2">
+                          {lg.hasGlitch ? <span className="text-xs text-fuchsia-400">⚡</span> : null}
+                          {lg.type === 'DIVERGE_FIX' ? <span className="text-[10px] bg-red-900/50 text-red-300 px-1 rounded border border-red-800">路径纠偏</span> : null}
+                          <div className="text-xs text-slate-500">{formatDateTime(lg.endTime)}</div>
+                        </div>
                       </div>
                       {lg.wisdomQuote ? (
                         <div className={`font-serif italic rounded-md px-3 py-2 mt-3 mb-3 text-base font-semibold ${(['逻辑构建','系统洞察'].includes(lg.wisdomType) ? 'bg-emerald-500/10 text-emerald-200' : (['人道共情','自省觉察'].includes(lg.wisdomType) ? 'bg-amber-500/10 text-amber-200' : 'bg-slate-800 text-slate-200'))}`}>
