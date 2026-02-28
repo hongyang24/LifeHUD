@@ -12,6 +12,7 @@ export default function App() {
   const [tasks, setTasks] = useState(initialTasks)
   const [title, setTitle] = useState('')
   const [type, setType] = useState('主线')
+  const [parentId, setParentId] = useState('')
   const initialActive = useMemo(() => {
     try {
       const raw = localStorage.getItem('lifehud.active')
@@ -128,10 +129,14 @@ export default function App() {
       id: Date.now(),
       title: t,
       type,
+      parentId,
+      isSummitted: type === '支线' ? false : undefined,
+      medal: type === '支线' ? '' : undefined,
       status: '待启动'
     }
     setTasks(prev => [item, ...prev])
     setTitle('')
+    setParentId('')
   }
 
   const startTask = (id) => {
@@ -160,13 +165,104 @@ export default function App() {
     }
     setIsSettling(true)
   }
-  const confirmArchive = () => {
+  const [selectedMainQuestId, setSelectedMainQuestId] = useState('')
+  const [scrollToSideQuestId, setScrollToSideQuestId] = useState(null)
+  
+  const [celebration, setCelebration] = useState(null)
+
+  const onAchieveSideQuest = (item) => {
+    // 检查是否有未完成的日常副本（即还在 tasks 列表中的）
+    const unfinishedRoutines = tasks.filter(t => String(t.parentId) === String(item.id) && t.type === '日常')
+    
+    if (unfinishedRoutines.length > 0) {
+      alert(`以下关联副本尚未完结（请先完成或销毁）：\n${unfinishedRoutines.map(t => `• ${t.title}`).join('\n')}`)
+      return
+    }
+    
+    // 达成支线：标记为 isSummitted
+    setTasks(prev => prev.map(t => t.id === item.id ? { ...t, isSummitted: true } : t))
+    
+    // 准备跳转数据
+    const totalMs = getTaskTotalTime(item.id)
+    setCelebration({
+      title: item.title,
+      timeStr: formatHM(totalMs)
+    })
+    
+    // 跳转到 MainQuest
+    setSelectedMainQuestId(item.parentId)
+    setScrollToSideQuestId(item.id)
+    setView('mainquest')
+  }
+
+  useEffect(() => {
+    if (view === 'mainquest' && !selectedMainQuestId) {
+      const first = tasks.find(t => t.type === '主线')
+      if (first) setSelectedMainQuestId(first.id)
+    }
+  }, [view, tasks, selectedMainQuestId])
+
+  useEffect(() => {
+    if (view === 'mainquest' && scrollToSideQuestId) {
+      const el = document.getElementById(`side-quest-${scrollToSideQuestId}`)
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' })
+        setScrollToSideQuestId(null)
+      }
+    }
+  }, [view, scrollToSideQuestId, selectedMainQuestId])
+
+  const formatHM = (ms) => {
+    if (!ms || ms < 0) return '00:00'
+    const minutes = Math.floor(ms / 60000)
+    const h = Math.floor(minutes / 60)
+    const m = minutes % 60
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+  }
+
+  const getTaskTotalTime = (taskId) => {
+    // 1. 从当前活跃任务中找到子任务 ID
+    const activeChildren = tasks.filter(t => String(t.parentId) === String(taskId) && t.type === '日常')
+    const activeChildIds = activeChildren.map(c => c.id)
+
+    // 2. 从日志中找到曾属于该支线的任务 ID（通过 parentId 字段）
+    // 只要日志中有一条记录表明某 taskId 的 parentId 是当前支线，该 taskId 的所有日志都应计入
+    const archivedChildIds = logs
+      .filter(l => String(l.parentId) === String(taskId))
+      .map(l => l.taskId)
+    
+    // 合并所有子任务 ID（去重）
+    const allChildIds = [...new Set([...activeChildIds, ...archivedChildIds])]
+
+    // 3. 统计这些子任务的 logs 总时长
+    let totalMs = logs
+      .filter(l => allChildIds.includes(l.taskId))
+      .reduce((acc, curr) => acc + (curr.elapsedMs || 0), 0)
+    
+    // 4. 如果当前正在进行的任务属于该支线（的子任务），也加上当前时长
+    if (activeTaskId && startTime) {
+      const currentRunning = tasks.find(t => t.id === activeTaskId)
+      // 检查 currentRunning 是否在我们的子任务列表中
+      // 注意：currentRunning 肯定在 tasks 里，所以它应该已经被 activeChildren 捕获
+      // 除非 currentRunning 是个新加的且还没产生 log？
+      // 只要它的 parentId 匹配，它就在 activeChildIds 里
+      if (currentRunning && String(currentRunning.parentId) === String(taskId) && currentRunning.type === '日常') {
+        totalMs += (now - startTime)
+      }
+    }
+
+    return totalMs
+  }
+
+  const achieveRoutine = () => {
+    // 达成日常副本：结算并销毁
     const endTime = Date.now()
     try {
       const raw = localStorage.getItem('lifehud.logs')
       const logs = raw ? JSON.parse(raw) : []
-      logs.push({
+      const newLog = {
         taskId: activeTaskId,
+        parentId: currentTask?.parentId, // 记录 parentId 以便销毁后追溯
         title: currentTask?.title,
         type: currentTask?.type,
         startTime,
@@ -182,9 +278,68 @@ export default function App() {
         glitchResponse,
         hasEcho: currentTask?.hasEcho || false,
         echoResponse
-      })
+      }
+      logs.push(newLog)
       localStorage.setItem('lifehud.logs', JSON.stringify(logs))
+      setLogs(logs.sort((a,b) => (b.endTime||0) - (a.endTime||0)))
     } catch {}
+
+    // 从 tasks 中移除
+    setTasks(prev => prev.filter(t => t.id !== activeTaskId))
+
+    setActiveTaskId(null)
+    setStartTime(null)
+    setIsSettling(false)
+    setBodyState(null)
+    setWisdomType('')
+    setWisdomQuote('')
+    setCharisma('')
+    setMoods([])
+    setMoneyDelta('')
+    setGlitchTriggered(false)
+    setGlitchText('')
+    setGlitchResponse('')
+    setEchoData(null)
+    setEchoResponse('')
+    setShowEchoOverlay(false)
+    setDivergeMode(false)
+    setDivergeTask('')
+  }
+
+  const confirmArchive = () => {
+    const endTime = Date.now()
+    try {
+      const raw = localStorage.getItem('lifehud.logs')
+      const logs = raw ? JSON.parse(raw) : []
+      const newLog = {
+        taskId: activeTaskId,
+        parentId: currentTask?.parentId, // 记录 parentId
+        title: currentTask?.title,
+        type: currentTask?.type,
+        startTime,
+        endTime,
+        elapsedMs: startTime ? endTime - startTime : 0,
+        bodyState,
+        wisdomType,
+        wisdomQuote,
+        charisma,
+        moods,
+        moneyDelta: Number(moneyDelta) || 0,
+        hasGlitch: currentTask?.hasGlitch || false,
+        glitchResponse,
+        hasEcho: currentTask?.hasEcho || false,
+        echoResponse
+      }
+      logs.push(newLog)
+      localStorage.setItem('lifehud.logs', JSON.stringify(logs))
+      setLogs(logs.sort((a,b) => (b.endTime||0) - (a.endTime||0)))
+    } catch {}
+    
+    // 如果是日常副本，结算后重置为待启动（实现循环）
+    if (currentTask && currentTask.type === '日常') {
+      setTasks(prev => prev.map(t => t.id === activeTaskId ? { ...t, status: '待启动', hasGlitch: false, hasEcho: false } : t))
+    }
+
     setActiveTaskId(null)
     setStartTime(null)
     setIsSettling(false)
@@ -262,15 +417,13 @@ export default function App() {
   }, [activeTaskId, isSettling])
 
   useEffect(() => {
-    if (view === 'logs') {
-      try {
-        const raw = localStorage.getItem('lifehud.logs')
-        const arr = raw ? JSON.parse(raw) : []
-        arr.sort((a,b) => (b.endTime||0) - (a.endTime||0))
-        setLogs(arr)
-      } catch {
-        setLogs([])
-      }
+    try {
+      const raw = localStorage.getItem('lifehud.logs')
+      const arr = raw ? JSON.parse(raw) : []
+      arr.sort((a,b) => (b.endTime||0) - (a.endTime||0))
+      setLogs(arr)
+    } catch {
+      setLogs([])
     }
   }, [view, isSettling])
 
@@ -411,6 +564,12 @@ export default function App() {
           >
             冒险日志
           </button>
+          <button
+            onClick={() => setView('mainquest')}
+            className={`text-xs rounded-md px-3 py-1 flex items-center gap-1 ${view==='mainquest' ? 'bg-slate-800 text-slate-200 ring-1 ring-cyan-500' : 'bg-slate-900 text-slate-400 ring-1 ring-slate-700'}`}
+          >
+            <span>MainQuest</span>
+          </button>
         </div>
         {view==='terminal' && currentTask ? (
           <section className="mt-16 flex flex-col items-center text-center gap-8">
@@ -461,6 +620,14 @@ export default function App() {
             >
               结束任务并结算感知
             </button>
+            {currentTask.type === '日常' && !divergeMode && (
+              <button
+                onClick={achieveRoutine}
+                className="mt-4 border-2 border-cyan-500 text-cyan-400 rounded-md px-5 py-2 hover:bg-cyan-500/10 text-sm"
+              >
+                已达成副本 (销毁)
+              </button>
+            )}
             {isSettling && (
               <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center z-50">
                 <div className="max-w-2xl w-full mx-4 border border-slate-700 rounded-lg bg-slate-900/80 p-6 max-h-[80vh] overflow-y-auto">
@@ -670,6 +837,21 @@ export default function App() {
                 <option value="支线">支线任务</option>
                 <option value="日常">日常副本</option>
               </select>
+              {type !== '主线' && (
+                <select
+                  value={parentId}
+                  onChange={e => setParentId(e.target.value)}
+                  className="bg-slate-900 text-slate-300 border border-slate-700/60 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-slate-600 max-w-[150px]"
+                >
+                  <option value="">关联上级任务</option>
+                  {tasks
+                    .filter(t => (type === '支线' ? t.type === '主线' : t.type === '支线'))
+                    .map(t => (
+                      <option key={t.id} value={t.id}>{t.title}</option>
+                    ))
+                  }
+                </select>
+              )}
               <button
                 onClick={onAdd}
                 className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 rounded-md px-3 py-2"
@@ -689,14 +871,50 @@ export default function App() {
                 <ul className="divide-y divide-slate-800">
                   {tasks.filter(t => t.status === '待启动').map(item => (
                     <li key={item.id} className="px-3 py-3 flex items-center gap-3">
-                      <span className="text-xs text-slate-400 shrink-0">[ {item.type} ]</span>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-xs text-slate-400">[ {item.type} ]</span>
+                        {item.type === '日常' && <span className="text-xs text-cyan-500 font-bold">∞</span>}
+                        {item.type === '支线' && (
+                          <span className="text-xs text-emerald-500 font-mono">
+                            ⌛ {formatHM(getTaskTotalTime(item.id))}
+                          </span>
+                        )}
+                      </div>
                       <span className="text-slate-200 flex-1 truncate">{item.title}</span>
-                      <button
-                        onClick={() => startTask(item.id)}
-                        className="bg-cyan-600 hover:bg-cyan-500 text-slate-900 rounded-md px-3 py-1 text-sm"
-                      >
-                        启动
-                      </button>
+                      {item.type === '日常' ? (
+                        <button
+                          onClick={() => startTask(item.id)}
+                          className="bg-cyan-600 hover:bg-cyan-500 text-slate-900 rounded-md px-3 py-1 text-sm"
+                        >
+                          启动
+                        </button>
+                      ) : (
+                        <div className="flex gap-2">
+                          {item.type === '支线' && !item.isSummitted && (
+                            <button
+                              onClick={() => onAchieveSideQuest(item)}
+                              className="bg-emerald-700 hover:bg-emerald-600 text-emerald-100 border border-emerald-600 rounded-md px-3 py-1 text-sm"
+                            >
+                              达成
+                            </button>
+                          )}
+                          <button
+                            onClick={() => {
+                              if (item.type === '主线') {
+                                setSelectedMainQuestId(item.id)
+                                setView('mainquest')
+                              } else if (item.type === '支线') {
+                                setSelectedMainQuestId(item.parentId)
+                                setScrollToSideQuestId(item.id)
+                                setView('mainquest')
+                              }
+                            }}
+                            className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 rounded-md px-3 py-1 text-sm"
+                          >
+                            跳转
+                          </button>
+                        </div>
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -705,6 +923,148 @@ export default function App() {
               )}
             </div>
           </section>
+        ) : view === 'mainquest' ? (
+          <div className="mt-4 min-h-[60vh] bg-slate-900/30 rounded-lg relative overflow-hidden flex flex-col">
+            <div className="absolute top-8 left-0 right-0 text-center pointer-events-none z-10">
+              <div className="text-2xl font-serif italic text-slate-200/40 tracking-widest">
+                踏上取经路比取得真经更重要
+              </div>
+            </div>
+            
+            <div className="p-6 pt-24 relative z-20 flex-1 flex flex-col">
+              <div className="max-w-md mx-auto w-full mb-8">
+                <select 
+                  className="w-full bg-slate-800/80 text-slate-200 border border-slate-700 rounded-md px-4 py-3 text-lg focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                  value={selectedMainQuestId}
+                  onChange={e => setSelectedMainQuestId(e.target.value)}
+                >
+                  <option value="">选择主线剧情...</option>
+                  {tasks.filter(t => t.type === '主线').map(t => (
+                    <option key={t.id} value={t.id}>{t.title}</option>
+                  ))}
+                </select>
+              </div>
+              
+              {selectedMainQuestId && (
+                <div className="flex-1 overflow-x-auto overflow-y-hidden pt-12 pb-4 flex items-end gap-2 px-12 min-h-[300px]">
+                  <svg className="h-0 w-0 absolute">
+                    <defs>
+                      <linearGradient id="grad-cyan" x1="0%" y1="0%" x2="0%" y2="100%">
+                        <stop offset="0%" style={{stopColor:'#06b6d4', stopOpacity:0.8}} />
+                        <stop offset="100%" style={{stopColor:'#06b6d4', stopOpacity:0}} />
+                      </linearGradient>
+                      <linearGradient id="grad-amber" x1="0%" y1="0%" x2="0%" y2="100%">
+                        <stop offset="0%" style={{stopColor:'#f59e0b', stopOpacity:0.8}} />
+                        <stop offset="100%" style={{stopColor:'#f59e0b', stopOpacity:0}} />
+                      </linearGradient>
+                      <linearGradient id="grad-slate" x1="0%" y1="0%" x2="0%" y2="100%">
+                        <stop offset="0%" style={{stopColor:'#475569', stopOpacity:0.6}} />
+                        <stop offset="100%" style={{stopColor:'#475569', stopOpacity:0}} />
+                      </linearGradient>
+                    </defs>
+                  </svg>
+                  {tasks
+                    .filter(t => String(t.parentId) === String(selectedMainQuestId) && t.type === '支线')
+                    .map((t, idx) => {
+                      const totalMs = getTaskTotalTime(t.id)
+                      const altitude = Math.floor(totalMs / 60000)
+                      const isSummitted = t.isSummitted
+                      // 检查该支线下是否有正在进行的任务
+                      const isActive = activeTaskId && tasks.find(sub => sub.id === activeTaskId && sub.parentId === t.id)
+                      
+                      const width = 200
+                      const height = Math.min(300, Math.max(50, altitude * 2)) // 最小高度50，最大300
+                      
+                      // 生成山体路径 (基于ID的伪随机)
+                      const seed = t.id
+                      const prng = (s) => {
+                        let x = Math.sin(s) * 10000
+                        return x - Math.floor(x)
+                      }
+                      
+                      // 简单的崎岖路径: 5个点
+                      const p1 = [0, 300]
+                      const p2 = [width * 0.25, 300 - height * (0.3 + prng(seed)*0.2)]
+                      const p3 = [width * 0.5, 300 - height] // 峰顶
+                      const p4 = [width * 0.75, 300 - height * (0.4 + prng(seed+1)*0.2)]
+                      const p5 = [width, 300]
+                      
+                      const d = `M ${p1[0]} ${p1[1]} L ${p2[0]} ${p2[1]} L ${p3[0]} ${p3[1]} L ${p4[0]} ${p4[1]} L ${p5[0]} ${p5[1]} Z`
+                      
+                      return (
+                        <div key={t.id} id={`side-quest-${t.id}`} className="relative group shrink-0" style={{ width, height: 320 }}>
+                          <svg width={width} height={320} className="overflow-visible">
+                            <path 
+                              d={d} 
+                              fill={`url(#grad-${isSummitted ? 'amber' : (isActive ? 'cyan' : 'slate')})`}
+                              stroke={isSummitted ? '#f59e0b' : (isActive ? '#06b6d4' : '#475569')}
+                              strokeWidth="2"
+                              className="transition-all duration-1000 ease-in-out"
+                              style={{ 
+                                filter: isActive ? 'drop-shadow(0 0 10px rgba(6,182,212,0.5))' : 'none',
+                                transformOrigin: 'bottom',
+                                transform: isActive ? 'scaleY(1.02)' : 'scaleY(1)' // 简单的呼吸效果
+                              }}
+                            />
+                            {isSummitted && (
+                              <g transform={`translate(${width/2 - 10}, ${300 - height - 30})`}>
+                                <path d="M5 0 L15 5 L5 10 V25" stroke="#f59e0b" strokeWidth="2" fill="#fbbf24" />
+                              </g>
+                            )}
+                          </svg>
+                          
+                          {/* 悬浮显示海拔 */}
+                          <div 
+                            className="absolute left-0 right-0 flex justify-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
+                            style={{ top: 300 - height - 10, transform: 'translateY(-100%)' }}
+                          >
+                            <div className="bg-slate-900/80 text-slate-200 px-2 py-1 rounded text-xs border border-slate-700 font-mono">
+                              {formatHM(totalMs)}
+                            </div>
+                          </div>
+                          
+                          {/* 底部名称 */}
+                          <div className="absolute bottom-0 left-0 right-0 text-center pb-2">
+                            <div className="text-xs text-slate-400 truncate px-2 font-mono">
+                              {t.title}
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })
+                  }
+                  {tasks.filter(t => String(t.parentId) === String(selectedMainQuestId) && t.type === '支线').length === 0 && (
+                     <div className="w-full text-center text-slate-500 py-20">
+                       [ 该主线暂无已探明的支线领域 ]
+                     </div>
+                  )}
+                </div>
+              )}
+            </div>
+            
+            {/* 装饰性背景元素 */}
+            <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-slate-950 to-transparent pointer-events-none"></div>
+
+            {/* 达成庆贺弹窗 */}
+            {celebration && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-md animate-in fade-in duration-300">
+                <div className="text-center p-8 border-2 border-amber-500/50 bg-slate-900 rounded-lg shadow-[0_0_50px_rgba(245,158,11,0.3)] max-w-lg mx-4">
+                  <div className="text-amber-500 font-mono text-sm mb-4 tracking-widest">[ 支线领域已完全征服 ]</div>
+                  <div className="text-3xl font-bold text-slate-100 mb-2">{celebration.title}</div>
+                  <div className="text-amber-400 font-mono text-xl mb-6">总耗时: {celebration.timeStr}</div>
+                  <div className="text-slate-300 italic font-serif text-lg mb-8 leading-relaxed">
+                    “享受一会成功的快乐吧，<br/>不要着急继续攀登。”
+                  </div>
+                  <button
+                    onClick={() => setCelebration(null)}
+                    className="bg-amber-600 hover:bg-amber-500 text-slate-900 font-bold py-2 px-8 rounded-md transition-colors"
+                  >
+                    铭记此刻
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         ) : (
           <section className="mt-4 space-y-3">
             {logs.length ? (
@@ -733,7 +1093,9 @@ export default function App() {
                         <div className="flex items-center gap-2">
                           {lg.hasGlitch ? <span className="text-xs text-fuchsia-400">⚡</span> : null}
                           {lg.type === 'DIVERGE_FIX' ? <span className="text-[10px] bg-red-900/50 text-red-300 px-1 rounded border border-red-800">路径纠偏</span> : null}
-                          <div className="text-xs text-slate-500">{formatDateTime(lg.endTime)}</div>
+                          <div className="text-xs text-slate-500">
+                            {formatDateTime(lg.startTime)} <span className="mx-1 opacity-50">/</span> {formatElapsed(lg.elapsedMs)}
+                          </div>
                         </div>
                       </div>
                       {lg.wisdomQuote ? (

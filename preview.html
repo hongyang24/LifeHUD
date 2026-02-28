@@ -19,6 +19,7 @@
           const [getTasks, setTasks] = React.useState(read())
           const [title, setTitle] = React.useState('')
           const [type, setType] = React.useState('主线')
+          const [parentId, setParentId] = React.useState('')
           const readActive = () => {
             try { return JSON.parse(localStorage.getItem('lifehud.active') || '{"activeTaskId":null,"startTime":null}') } catch { return { activeTaskId:null, startTime:null } }
           }
@@ -36,6 +37,38 @@
           const [glitchText, setGlitchText] = React.useState('')
           const [glitchResponse, setGlitchResponse] = React.useState('')
           const [entropy, setEntropy] = React.useState(0)
+          const [view, setView] = React.useState('terminal')
+          const [logs, setLogs] = React.useState([])
+          const [selectedMainQuestId, setSelectedMainQuestId] = React.useState('')
+          const [scrollToSideQuestId, setScrollToSideQuestId] = React.useState(null)
+          
+          React.useEffect(() => {
+            if (view === 'mainquest' && !selectedMainQuestId) {
+              const first = getTasks.find(t => t.type === '主线')
+              if (first) setSelectedMainQuestId(first.id)
+            }
+          }, [view, getTasks, selectedMainQuestId])
+          
+          React.useEffect(() => {
+            if (view === 'mainquest' && scrollToSideQuestId) {
+              const el = document.getElementById(`side-quest-${scrollToSideQuestId}`)
+              if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' })
+                setScrollToSideQuestId(null)
+              }
+            }
+          }, [view, scrollToSideQuestId, selectedMainQuestId])
+          
+          React.useEffect(() => {
+            if (view === 'logs') {
+              try {
+                const raw = localStorage.getItem('lifehud.logs')
+                const arr = raw ? JSON.parse(raw) : []
+                arr.sort((a,b) => (b.endTime||0) - (a.endTime||0))
+                setLogs(arr)
+              } catch { setLogs([]) }
+            }
+          }, [view, isSettling])
           
           const calculateEntropy = () => {
             try {
@@ -180,9 +213,18 @@
           const onAdd = () => {
             const t = title.trim()
             if (!t) return
-            const item = { id: Date.now(), title: t, type, status: '待启动' }
+            const item = {
+              id: Date.now(),
+              title: t,
+              type,
+              parentId,
+              isSummitted: type === '支线' ? false : undefined,
+              medal: type === '支线' ? '' : undefined,
+              status: '待启动'
+            }
             setTasks(prev => [item, ...prev])
             setTitle('')
+            setParentId('')
           }
           const startTask = id => {
             setTasks(prev => prev.map(it => it.id === id ? { ...it, status: '进行中', hasGlitch: it.hasGlitch ?? false } : it))
@@ -206,6 +248,114 @@
             const ss = String(s%60).padStart(2,'0')
             return `${hh}:${mm}:${ss}`
           }
+          const formatDateTime = ms => {
+            if (!ms) return ''
+            const d = new Date(ms)
+            const Y = d.getFullYear()
+            const M = String(d.getMonth()+1).padStart(2,'0')
+            const D = String(d.getDate()).padStart(2,'0')
+            const h = String(d.getHours()).padStart(2,'0')
+            const m = String(d.getMinutes()).padStart(2,'0')
+            return `${Y}-${M}-${D} ${h}:${m}`
+          }
+          const formatHM = ms => {
+            if (!ms || ms < 0) return '00:00'
+            const minutes = Math.floor(ms / 60000)
+            const h = Math.floor(minutes / 60)
+            const m = minutes % 60
+            return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+          }
+          const getTaskTotalTime = taskId => {
+            const activeChildren = getTasks.filter(t => String(t.parentId) === String(taskId) && t.type === '日常')
+            const activeChildIds = activeChildren.map(c => c.id)
+            let logs = []
+            try { logs = JSON.parse(localStorage.getItem('lifehud.logs') || '[]') } catch {}
+            const archivedChildIds = logs.filter(l => String(l.parentId) === String(taskId)).map(l => l.taskId)
+            const allChildIds = [...new Set([...activeChildIds, ...archivedChildIds])]
+            let totalMs = logs.filter(l => allChildIds.includes(l.taskId)).reduce((acc, curr) => acc + (curr.elapsedMs || 0), 0)
+            if (activeTaskId && startTime) {
+              const currentRunning = getTasks.find(t => t.id === activeTaskId)
+              if (currentRunning && String(currentRunning.parentId) === String(taskId) && currentRunning.type === '日常') {
+                totalMs += (now - startTime)
+              }
+            }
+            return totalMs
+          }
+          const achieveRoutine = () => {
+            const endTime = Date.now()
+            try {
+              const raw = localStorage.getItem('lifehud.logs')
+              const logs = raw ? JSON.parse(raw) : []
+              const newLog = {
+                taskId: activeTaskId,
+                parentId: currentTask && currentTask.parentId,
+                title: currentTask && currentTask.title,
+                type: currentTask && currentTask.type,
+                startTime,
+                endTime,
+                elapsedMs: startTime ? endTime - startTime : 0,
+                bodyState,
+                wisdomType,
+                wisdomQuote,
+                charisma,
+                moods,
+                moneyDelta: Number(moneyDelta) || 0,
+                hasGlitch: currentTask && currentTask.hasGlitch || false,
+                glitchResponse: window.__respState || '',
+                hasEcho: currentTask && currentTask.hasEcho || false,
+                echoResponse: window.__echoResp || ''
+              }
+              logs.push(newLog)
+              localStorage.setItem('lifehud.logs', JSON.stringify(logs))
+              setLogs(logs.sort((a,b) => (b.endTime||0) - (a.endTime||0)))
+            } catch {}
+            setTasks(prev => prev.filter(t => t.id !== activeTaskId))
+            setActiveTaskId(null); setStartTime(null); setIsSettling(false)
+            setBodyState(null); setWisdomType(''); setWisdomQuote(''); setCharisma(''); setMoods([]); setMoneyDelta('')
+            setGlitchTriggered(false); setGlitchText(''); setGlitchResponse('')
+            setEchoData(null); setEchoResponse(''); setShowEchoOverlay(false)
+            setDivergeMode(false); setDivergeTask('')
+          }
+
+          const confirmArchive = () => {
+            const endTime = Date.now()
+            try {
+              const raw = localStorage.getItem('lifehud.logs')
+              const logs = raw ? JSON.parse(raw) : []
+              const currentTask = getTasks.find(t => t.id === activeTaskId)
+              const newLog = {
+                taskId: activeTaskId,
+                parentId: currentTask && currentTask.parentId,
+                title: currentTask && currentTask.title,
+                type: currentTask && currentTask.type,
+                startTime,
+                endTime,
+                elapsedMs: startTime ? endTime - startTime : 0,
+                bodyState,
+                wisdomType,
+                wisdomQuote,
+                charisma,
+                moods,
+                moneyDelta: Number(moneyDelta) || 0,
+                hasGlitch: currentTask && currentTask.hasGlitch || false,
+                glitchResponse: window.__respState || '',
+                hasEcho: currentTask && currentTask.hasEcho || false,
+                echoResponse: window.__echoResp || ''
+              }
+              logs.push(newLog)
+              localStorage.setItem('lifehud.logs', JSON.stringify(logs))
+              setLogs(logs.sort((a,b) => (b.endTime||0) - (a.endTime||0)))
+              
+              if (currentTask && currentTask.type === '日常') {
+                setTasks(prev => prev.map(t => t.id === activeTaskId ? { ...t, status: '待启动', hasGlitch: false, hasEcho: false } : t))
+              }
+            } catch {}
+            setActiveTaskId(null); setStartTime(null); setIsSettling(false)
+            setBodyState(null); setWisdomType(''); setWisdomQuote(''); setCharisma(''); setMoods([]); setMoneyDelta('')
+            setGlitchTriggered(false); setGlitchText(''); setGlitchResponse('')
+            setEchoData(null); setEchoResponse(''); setShowEchoOverlay(false)
+            setDivergeMode(false); setDivergeTask('')
+          }
           const currentTask = getTasks.find(t => t.id === activeTaskId)
           const elapsed = startTime ? formatElapsed(now - startTime) : null
           const sealed = entropy > 70
@@ -226,7 +376,23 @@
                 ),
                 React.createElement('div', { className: 'border-b border-slate-700 mt-2' })
               ),
-              currentTask
+              React.createElement(
+                'div',
+                { className: 'mt-2 flex gap-2' },
+                React.createElement('button', {
+                  onClick: () => setView('terminal'),
+                  className: `text-xs rounded-md px-3 py-1 ${view==='terminal' ? 'bg-slate-800 text-slate-200 ring-1 ring-cyan-500' : 'bg-slate-900 text-slate-400 ring-1 ring-slate-700'}`
+                }, '任务终端'),
+                React.createElement('button', {
+                  onClick: () => setView('logs'),
+                  className: `text-xs rounded-md px-3 py-1 ${view==='logs' ? 'bg-slate-800 text-slate-200 ring-1 ring-cyan-500' : 'bg-slate-900 text-slate-400 ring-1 ring-slate-700'}`
+                }, '冒险日志'),
+                React.createElement('button', {
+                  onClick: () => setView('mainquest'),
+                  className: `text-xs rounded-md px-3 py-1 flex items-center gap-1 ${view==='mainquest' ? 'bg-slate-800 text-slate-200 ring-1 ring-cyan-500' : 'bg-slate-900 text-slate-400 ring-1 ring-slate-700'}`
+                }, React.createElement('span', {}, 'MainQuest'))
+              ),
+              view === 'terminal' && currentTask
                 ? React.createElement(
                     'section',
                     { className: 'mt-16 flex flex-col items-center text-center gap-8' },
@@ -275,6 +441,10 @@
                       },
                       className: `mt-8 border-2 border-amber-500 text-amber-400 rounded-md px-5 py-3 ${divergeMode ? 'opacity-50 cursor-not-allowed' : 'hover:bg-amber-500/10'}`
                     }, '结束任务并结算感知'),
+                    currentTask && currentTask.type === '日常' && !divergeMode ? React.createElement('button', {
+                      onClick: achieveRoutine,
+                      className: 'mt-4 border-2 border-cyan-500 text-cyan-400 rounded-md px-5 py-2 hover:bg-cyan-500/10 text-sm'
+                    }, '已达成副本 (销毁)') : null,
                     isSettling && React.createElement(
                       'div',
                       { className: 'fixed inset-0 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center z-50' },
@@ -473,44 +643,15 @@
                           React.createElement(
                             'button',
                             {
-                              onClick: () => {
-                                try {
-                                  const raw = localStorage.getItem('lifehud.logs')
-                                  const logs = raw ? JSON.parse(raw) : []
-                                  const endTime = Date.now()
-                                  const currentTask = getTasks.find(t => t.id === activeTaskId)
-                                  logs.push({
-                                    taskId: activeTaskId,
-                                    title: currentTask && currentTask.title,
-                                    type: currentTask && currentTask.type,
-                                    startTime,
-                                    endTime,
-                                    elapsedMs: startTime ? endTime - startTime : 0,
-                                    bodyState,
-                                    wisdomType,
-                                    wisdomQuote,
-                                    charisma,
-                                    moods,
-                                    moneyDelta: Number(moneyDelta) || 0,
-                                    hasGlitch: currentTask && currentTask.hasGlitch || false,
-                                    glitchResponse: window.__respState || '',
-                                    hasEcho: currentTask && currentTask.hasEcho || false,
-                                    echoResponse: window.__echoResp || ''
-                                  })
-                                  localStorage.setItem('lifehud.logs', JSON.stringify(logs))
-                                } catch {}
-                                setActiveTaskId(null); setStartTime(null); setIsSettling(false)
-                                setBodyState(null); setWisdomType(''); setWisdomQuote(''); setCharisma(''); setMoods([]); setMoneyDelta('')
-                              },
+                              onClick: confirmArchive,
                               className: 'border-2 border-cyan-500 text-cyan-300 hover:bg-cyan-500/10 rounded-md px-4 py-2'
                             },
                             '确认存档'
                           )
-                        )
                       )
                     )
                   )
-                : React.createElement(
+                : view === 'terminal' ? React.createElement(
                     'section',
                     { className: 'mt-4 space-y-3' },
                     React.createElement(
@@ -533,6 +674,18 @@
                         React.createElement('option', { value: '支线' }, '支线任务'),
                         React.createElement('option', { value: '日常' }, '日常副本')
                       ),
+                      type !== '主线' ? React.createElement(
+                        'select',
+                        {
+                          value: parentId,
+                          onChange: e => setParentId(e.target.value),
+                          className: 'bg-slate-900 text-slate-300 border border-slate-700/60 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-slate-600 max-w-[150px]'
+                        },
+                        React.createElement('option', { value: '' }, '关联上级任务'),
+                        ...getTasks.filter(t => (type === '支线' ? t.type === '主线' : t.type === '支线')).map(t =>
+                          React.createElement('option', { key: t.id, value: t.id }, t.title)
+                        )
+                      ) : null,
                       React.createElement(
                         'button',
                         { onClick: onAdd, className: 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 rounded-md px-3 py-2' },
@@ -541,67 +694,183 @@
                         React.createElement('div', { className: 'ml-auto text-xs text-slate-400 font-mono' }, `ENTROPY: ${String(entropy).padStart(2,'0')}%`)
                       ),
                     React.createElement(
-                      'div',
-                      { className: 'border border-slate-800 rounded-md' },
-                      React.createElement('div', { className: 'px-3 py-2 text-xs text-slate-400 border-b border-slate-800' }, '看板'),
-                      (() => {
-                        const waiting = getTasks.filter(t => t.status === '待启动')
-                        return waiting.length
-                          ? React.createElement(
-                              'ul',
-                              { className: 'divide-y divide-slate-800' },
-                              ...waiting.map(item =>
-                                React.createElement(
-                                  'li',
-                                  { key: item.id, className: 'px-3 py-3 flex items-center gap-3' },
-                                  React.createElement('span', { className: 'text-xs text-slate-400 shrink-0' }, `[ ${item.type} ]`),
-                                  React.createElement('span', { className: 'text-slate-200 flex-1 truncate' }, item.title),
-                                  React.createElement(
-                                    'button',
-                                    { onClick: () => startTask(item.id), className: 'bg-cyan-600 hover:bg-cyan-500 text-slate-900 rounded-md px-3 py-1 text-sm' },
-                                    '启动'
-                                  )
-                                )
-                              )
-                            )
-                          : React.createElement('div', { className: 'px-3 py-4 text-sm text-slate-500' }, '[ 暂无待处理视域 ]')
-                        })()
-                      ),
-                      React.createElement(
                         'div',
                         { className: 'border border-slate-800 rounded-md' },
-                        React.createElement('div', { className: 'px-3 py-2 text-xs text-slate-400 border-b border-slate-800' }, '历史回溯'),
+                        React.createElement('div', { className: 'px-3 py-2 text-xs text-slate-400 border-b border-slate-800' }, '看板'),
                         (() => {
-                          const formatDateTime = ms => {
-                            if (!ms) return ''
-                            const d = new Date(ms)
-                            return `${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
-                          }
-                          let logs = []
-                          try { logs = JSON.parse(localStorage.getItem('lifehud.logs') || '[]') } catch {}
-                          logs.sort((a,b) => (b.endTime||0) - (a.endTime||0))
-                          return logs.length
+                          const waiting = getTasks.filter(t => t.status === '待启动')
+                          return waiting.length
                             ? React.createElement(
                                 'ul',
-                                { className: 'divide-y divide-slate-800 max-h-60 overflow-auto' },
-                                ...logs.map(lg =>
+                                { className: 'divide-y divide-slate-800' },
+                                ...waiting.map(item =>
                                   React.createElement(
                                     'li',
-                                    { key: lg.endTime + Math.random(), className: 'px-3 py-3 flex justify-between items-center' },
-                                    React.createElement('span', { className: 'text-slate-300 text-sm truncate flex-1 mr-2' }, lg.title || '未知任务'),
+                                    { key: item.id, className: 'px-3 py-3 flex items-center gap-3' },
                                     React.createElement(
                                       'div',
                                       { className: 'flex items-center gap-2 shrink-0' },
-                                      lg.hasGlitch ? React.createElement('span', { className: 'text-xs text-fuchsia-400' }, '⚡') : null,
-                                      lg.type === 'DIVERGE_FIX' ? React.createElement('span', { className: 'text-[10px] bg-red-900/50 text-red-300 px-1 rounded border border-red-800' }, '路径纠偏') : null,
-                                      React.createElement('div', { className: 'text-xs text-slate-500' }, formatDateTime(lg.endTime))
+                                      React.createElement('span', { className: 'text-xs text-slate-400' }, `[ ${item.type} ]`),
+                                      item.type === '日常' ? React.createElement('span', { className: 'text-xs text-cyan-500 font-bold' }, '∞') : null,
+                                      item.type === '支线' ? React.createElement('span', { className: 'text-xs text-emerald-500 font-mono' }, `⌛ ${formatHM(getTaskTotalTime(item.id))}`) : null
+                                    ),
+                                    React.createElement('span', { className: 'text-slate-200 flex-1 truncate' }, item.title),
+                                    item.type === '日常' ? (
+                                      React.createElement(
+                                        'button',
+                                        { onClick: () => startTask(item.id), className: 'bg-cyan-600 hover:bg-cyan-500 text-slate-900 rounded-md px-3 py-1 text-sm' },
+                                        '启动'
+                                      )
+                                    ) : (
+                                      React.createElement(
+                                        'button',
+                                        {
+                                          onClick: () => {
+                                            if (item.type === '主线') {
+                                              setSelectedMainQuestId(item.id)
+                                              setView('mainquest')
+                                            } else if (item.type === '支线') {
+                                              setSelectedMainQuestId(item.parentId)
+                                              setScrollToSideQuestId(item.id)
+                                              setView('mainquest')
+                                            }
+                                          },
+                                          className: 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 rounded-md px-3 py-1 text-sm'
+                                        },
+                                        '跳转'
+                                      )
                                     )
                                   )
                                 )
                               )
-                            : React.createElement('div', { className: 'px-3 py-4 text-sm text-slate-500' }, '[ 暂无历史记录 ]')
+                            : React.createElement('div', { className: 'px-3 py-4 text-sm text-slate-500' }, '[ 暂无待处理视域 ]')
                         })()
                       )
+                    )
+                : view === 'mainquest' ? React.createElement(
+                    'div',
+                    { className: 'mt-4 min-h-[60vh] bg-slate-900/30 rounded-lg relative overflow-hidden flex flex-col' },
+                    React.createElement('div', { className: 'absolute top-8 left-0 right-0 text-center pointer-events-none z-10' },
+                      React.createElement('div', { className: 'text-2xl font-serif italic text-slate-200/40 tracking-widest' }, '踏上取经路比取得真经更重要')
+                    ),
+                    React.createElement('div', { className: 'p-6 pt-24 relative z-20 flex-1 flex flex-col' },
+                      React.createElement('div', { className: 'max-w-md mx-auto w-full mb-8' },
+                        React.createElement('select', {
+                          className: 'w-full bg-slate-800/80 text-slate-200 border border-slate-700 rounded-md px-4 py-3 text-lg focus:outline-none focus:ring-2 focus:ring-cyan-500/50',
+                          value: selectedMainQuestId,
+                          onChange: e => setSelectedMainQuestId(e.target.value)
+                        },
+                        React.createElement('option', { value: '' }, '选择主线剧情...'),
+                        ...getTasks.filter(t => t.type === '主线').map(t => React.createElement('option', { key: t.id, value: t.id }, t.title)))
+                      ),
+                      selectedMainQuestId ? React.createElement(
+                        'div',
+                        { className: 'flex-1 overflow-x-auto overflow-y-hidden pb-4 flex items-end gap-2 px-12 min-h-[300px]' },
+                        React.createElement('svg', { className: 'h-0 w-0 absolute' },
+                          React.createElement('defs', {},
+                            React.createElement('linearGradient', { id: 'grad-cyan', x1: '0%', y1: '0%', x2: '0%', y2: '100%' },
+                              React.createElement('stop', { offset: '0%', style: { stopColor: '#06b6d4', stopOpacity: 0.8 } }),
+                              React.createElement('stop', { offset: '100%', style: { stopColor: '#06b6d4', stopOpacity: 0 } })
+                            ),
+                            React.createElement('linearGradient', { id: 'grad-amber', x1: '0%', y1: '0%', x2: '0%', y2: '100%' },
+                              React.createElement('stop', { offset: '0%', style: { stopColor: '#f59e0b', stopOpacity: 0.8 } }),
+                              React.createElement('stop', { offset: '100%', style: { stopColor: '#f59e0b', stopOpacity: 0 } })
+                            ),
+                            React.createElement('linearGradient', { id: 'grad-slate', x1: '0%', y1: '0%', x2: '0%', y2: '100%' },
+                              React.createElement('stop', { offset: '0%', style: { stopColor: '#475569', stopOpacity: 0.6 } }),
+                              React.createElement('stop', { offset: '100%', style: { stopColor: '#475569', stopOpacity: 0 } })
+                            )
+                          )
+                        ),
+                        ...getTasks.filter(t => String(t.parentId) === String(selectedMainQuestId) && t.type === '支线').map((t) => {
+                          const totalMs = getTaskTotalTime(t.id)
+                          const altitude = Math.floor(totalMs / 60000)
+                          const isSummitted = t.isSummitted
+                          const isActive = activeTaskId && getTasks.find(sub => sub.id === activeTaskId && sub.parentId === t.id)
+                          const width = 200
+                          const height = Math.min(300, Math.max(50, altitude * 2))
+                          const seed = t.id
+                          const prng = (s) => { let x = Math.sin(s) * 10000; return x - Math.floor(x) }
+                          const p1 = [0, 300]
+                          const p2 = [width * 0.25, 300 - height * (0.3 + prng(seed)*0.2)]
+                          const p3 = [width * 0.5, 300 - height]
+                          const p4 = [width * 0.75, 300 - height * (0.4 + prng(seed+1)*0.2)]
+                          const p5 = [width, 300]
+                          const d = `M ${p1[0]} ${p1[1]} L ${p2[0]} ${p2[1]} L ${p3[0]} ${p3[1]} L ${p4[0]} ${p4[1]} L ${p5[0]} ${p5[1]} Z`
+                          return React.createElement(
+                            'div',
+                            { key: t.id, id: `side-quest-${t.id}`, className: 'relative group shrink-0', style: { width, height: 320 } },
+                            React.createElement('svg', { width, height: 320, className: 'overflow-visible' },
+                              React.createElement('path', {
+                                d,
+                                fill: `url(#grad-${isSummitted ? 'amber' : (isActive ? 'cyan' : 'slate')})`,
+                                stroke: isSummitted ? '#f59e0b' : (isActive ? '#06b6d4' : '#475569'),
+                                strokeWidth: '2',
+                                className: 'transition-all duration-1000 ease-in-out',
+                                style: {
+                                  filter: isActive ? 'drop-shadow(0 0 10px rgba(6,182,212,0.5))' : 'none',
+                                  transformOrigin: 'bottom',
+                                  transform: isActive ? 'scaleY(1.02)' : 'scaleY(1)'
+                                }
+                              }),
+                              isSummitted ? React.createElement('g', { transform: `translate(${width/2 - 10}, ${300 - height - 30})` },
+                                React.createElement('path', { d: 'M5 0 L15 5 L5 10 V25', stroke: '#f59e0b', strokeWidth: '2', fill: '#fbbf24' })
+                              ) : null
+                            ),
+                            React.createElement('div', { 
+                                 className: 'absolute left-0 right-0 flex justify-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none',
+                                 style: { top: 300 - height - 10, transform: 'translateY(-100%)' }
+                               },
+                               React.createElement('div', { className: 'bg-slate-900/80 text-slate-200 px-2 py-1 rounded text-xs border border-slate-700 font-mono' }, formatHM(totalMs))
+                            ),
+                            React.createElement('div', { className: 'absolute bottom-0 left-0 right-0 text-center pb-2' },
+                              React.createElement('div', { className: 'text-xs text-slate-400 truncate px-2 font-mono' }, t.title)
+                            )
+                          )
+                        }),
+                        getTasks.filter(t => String(t.parentId) === String(selectedMainQuestId) && t.type === '支线').length === 0 ? React.createElement('div', { className: 'w-full text-center text-slate-500 py-20' }, '[ 该主线暂无已探明的支线领域 ]') : null
+                      ) : null
+                    ),
+                    React.createElement('div', { className: 'absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-slate-950 to-transparent pointer-events-none' })
+                  )
+                : React.createElement(
+                    'section',
+                    { className: 'mt-4 space-y-3' },
+                    logs.length ? React.createElement(
+                      'ul',
+                      { className: 'space-y-3' },
+                      ...logs.map((lg, idx) => React.createElement(
+                        'li',
+                        { key: idx, className: 'relative bg-slate-900/50 border border-slate-800 rounded-md p-3' },
+                        (() => {
+                          const colorMap = {
+                            '逻辑构建': { bar: 'bg-blue-400', glow: 'drop-shadow-[0_0_8px_#60A5FA]' },
+                            '系统洞察': { bar: 'bg-indigo-500', glow: 'drop-shadow-[0_0_8px_#6366F1]' },
+                            '人道共情': { bar: 'bg-rose-400', glow: 'drop-shadow-[0_0_8px_#FB7185]' },
+                            '自省觉察': { bar: 'bg-teal-400', glow: 'drop-shadow-[0_0_8px_#2DD4BF]' }
+                          }
+                          const cm = colorMap[lg.wisdomType] || { bar: 'bg-slate-600', glow: 'drop-shadow-[0_0_8px_#64748B]' }
+                          const glow = lg.bodyState === '巅峰' ? cm.glow : ''
+                          return React.createElement('div', { className: `absolute left-0 top-0 h-full w-1 ${cm.bar} ${glow}` })
+                        })(),
+                        React.createElement('div', { className: 'ml-3' },
+                          React.createElement('div', { className: 'flex items-center justify-between' },
+                            React.createElement('div', { className: 'flex items-baseline gap-2' },
+                              React.createElement('div', { className: 'font-semibold text-slate-100 truncate' }, lg.title || '未命名任务'),
+                              React.createElement('div', { className: 'text-xs text-slate-400' }, `[ ${lg.type || '未知类型'} ]`)
+                            ),
+                            React.createElement('div', { className: 'flex items-center gap-2' },
+                                lg.hasGlitch ? React.createElement('span', { className: 'text-xs text-fuchsia-400' }, '⚡') : null,
+                                lg.type === 'DIVERGE_FIX' ? React.createElement('span', { className: 'text-[10px] bg-red-900/50 text-red-300 px-1 rounded border border-red-800' }, '路径纠偏') : null,
+                                React.createElement('div', { className: 'text-xs text-slate-500' }, `${formatDateTime(lg.startTime)} / ${formatElapsed(lg.elapsedMs)}`)
+                              )
+                          ),
+                          lg.wisdomQuote ? React.createElement('div', { className: `font-serif italic rounded-md px-3 py-2 mt-3 mb-3 text-base font-semibold ${(['逻辑构建','系统洞察'].includes(lg.wisdomType) ? 'bg-emerald-500/10 text-emerald-200' : (['人道共情','自省觉察'].includes(lg.wisdomType) ? 'bg-amber-500/10 text-amber-200' : 'bg-slate-800 text-slate-200'))}` }, `「${lg.wisdomQuote}」`) : null,
+                          React.createElement('div', { className: 'text-[11px] text-slate-400' }, `[ 躯体: ${lg.bodyState || '未知'} ] [ 场能: ${lg.charisma || '未知'} ]`),
+                          lg.moods && lg.moods.length ? React.createElement('div', { className: 'mt-1 text-[11px]' }, ...lg.moods.map((w, i) => React.createElement('span', { key: i, className: 'mr-1 text-slate-400' }, w))) : null
+                        )
+                      ))
+                    ) : React.createElement('div', { className: 'px-3 py-4 text-sm text-slate-500' }, '[ 历史记录尚是一片虚空 ]')
                   )
             )
           )
