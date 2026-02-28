@@ -11,6 +11,7 @@ export default function App() {
   }, [])
   const [tasks, setTasks] = useState(initialTasks)
   const [title, setTitle] = useState('')
+  const [description, setDescription] = useState('')
   const [type, setType] = useState('主线')
   const [parentId, setParentId] = useState('')
   const initialActive = useMemo(() => {
@@ -128,6 +129,7 @@ export default function App() {
     const item = {
       id: Date.now(),
       title: t,
+      description,
       type,
       parentId,
       isSummitted: type === '支线' ? false : undefined,
@@ -136,6 +138,7 @@ export default function App() {
     }
     setTasks(prev => [item, ...prev])
     setTitle('')
+    setDescription('')
     setParentId('')
   }
 
@@ -821,45 +824,55 @@ export default function App() {
           </section>
         ) : view==='terminal' ? (
           <section className="mt-4 space-y-3">
-            <div className="flex gap-2">
-              <input
-                value={title}
-                onChange={e => setTitle(e.target.value)}
-                placeholder="任务描述"
-                className="flex-1 bg-slate-900 text-slate-300 placeholder-slate-500 border border-slate-700/60 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-slate-600"
-              />
-              <select
-                value={type}
-                onChange={e => setType(e.target.value)}
-                className="bg-slate-900 text-slate-300 border border-slate-700/60 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-slate-600"
-              >
-                <option value="主线">主线剧情</option>
-                <option value="支线">支线任务</option>
-                <option value="日常">日常副本</option>
-              </select>
-              {type !== '主线' && (
+            <div className="flex flex-col gap-2">
+              <div className="flex gap-2 items-center">
+                <input
+                  value={title}
+                  onChange={e => setTitle(e.target.value)}
+                  placeholder="任务名称"
+                  className="flex-1 bg-slate-900 text-slate-300 placeholder-slate-500 border border-slate-700/60 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-slate-600"
+                />
                 <select
-                  value={parentId}
-                  onChange={e => setParentId(e.target.value)}
-                  className="bg-slate-900 text-slate-300 border border-slate-700/60 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-slate-600 max-w-[150px]"
+                  value={type}
+                  onChange={e => setType(e.target.value)}
+                  className="bg-slate-900 text-slate-300 border border-slate-700/60 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-slate-600"
                 >
-                  <option value="">关联上级任务</option>
-                  {tasks
-                    .filter(t => (type === '支线' ? t.type === '主线' : t.type === '支线'))
-                    .map(t => (
-                      <option key={t.id} value={t.id}>{t.title}</option>
-                    ))
-                  }
+                  <option value="主线">主线剧情</option>
+                  <option value="支线">支线任务</option>
+                  <option value="日常">日常副本</option>
                 </select>
-              )}
-              <button
-                onClick={onAdd}
-                className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 rounded-md px-3 py-2"
-              >
-                录入
-              </button>
-              <div className="ml-auto text-xs text-slate-400 font-mono">
-                ENTROPY: {String(entropy).padStart(2,'0')}%
+                {type !== '主线' && (
+                  <select
+                    value={parentId}
+                    onChange={e => setParentId(e.target.value)}
+                    className="bg-slate-900 text-slate-300 border border-slate-700/60 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-slate-600 max-w-[150px]"
+                  >
+                    <option value="">关联上级任务</option>
+                    {tasks
+                      .filter(t => (type === '支线' ? t.type === '主线' : t.type === '支线'))
+                      .map(t => (
+                        <option key={t.id} value={t.id}>{t.title}</option>
+                      ))
+                    }
+                  </select>
+                )}
+                <div className="ml-auto text-xs text-slate-400 font-mono whitespace-nowrap">
+                  ENTROPY: {String(entropy).padStart(2,'0')}%
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <input
+                  value={description}
+                  onChange={e => setDescription(e.target.value)}
+                  placeholder="任务详情 (可选)"
+                  className="flex-1 bg-slate-900 text-slate-300 placeholder-slate-500 border border-slate-700/60 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-slate-600"
+                />
+                <button
+                  onClick={onAdd}
+                  className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 rounded-md px-4 py-2 whitespace-nowrap"
+                >
+                  录入
+                </button>
               </div>
             </div>
  
@@ -880,7 +893,16 @@ export default function App() {
                           </span>
                         )}
                       </div>
-                      <span className="text-slate-200 flex-1 truncate">{item.title}</span>
+                      <div className="flex-1 min-w-0 flex flex-col">
+                        <div className="flex-1 min-w-0 flex flex-col">
+                        <span className="text-slate-200 truncate">{item.title}</span>
+                        {item.description && (
+                          <span className="text-xs text-slate-500 truncate" title={item.description}>
+                            {item.description}
+                          </span>
+                        )}
+                      </div>
+                      </div>
                       {item.type === '日常' ? (
                         <button
                           onClick={() => startTask(item.id)}

@@ -18,6 +18,7 @@
           }
           const [getTasks, setTasks] = React.useState(read())
           const [title, setTitle] = React.useState('')
+          const [description, setDescription] = React.useState('')
           const [type, setType] = React.useState('主线')
           const [parentId, setParentId] = React.useState('')
           const readActive = () => {
@@ -224,6 +225,7 @@
             }
             setTasks(prev => [item, ...prev])
             setTitle('')
+            setDescription('')
             setParentId('')
           }
           const startTask = id => {
@@ -656,43 +658,57 @@
                     { className: 'mt-4 space-y-3' },
                     React.createElement(
                       'div',
-                      { className: 'flex gap-2' },
-                      React.createElement('input', {
-                        value: title,
-                        onChange: e => setTitle(e.target.value),
-                        placeholder: '任务描述',
-                        className: 'flex-1 bg-slate-900 text-slate-300 placeholder-slate-500 border border-slate-700/60 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-slate-600'
-                      }),
+                      { className: 'flex flex-col gap-2' },
                       React.createElement(
-                        'select',
-                        {
-                          value: type,
-                          onChange: e => setType(e.target.value),
-                          className: 'bg-slate-900 text-slate-300 border border-slate-700/60 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-slate-600'
-                        },
-                        React.createElement('option', { value: '主线' }, '主线剧情'),
-                        React.createElement('option', { value: '支线' }, '支线任务'),
-                        React.createElement('option', { value: '日常' }, '日常副本')
+                        'div',
+                        { className: 'flex gap-2 items-center' },
+                        React.createElement('input', {
+                          value: title,
+                          onChange: e => setTitle(e.target.value),
+                          placeholder: '任务名称',
+                          className: 'flex-1 bg-slate-900 text-slate-300 placeholder-slate-500 border border-slate-700/60 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-slate-600'
+                        }),
+                        React.createElement(
+                          'select',
+                          {
+                            value: type,
+                            onChange: e => setType(e.target.value),
+                            className: 'bg-slate-900 text-slate-300 border border-slate-700/60 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-slate-600'
+                          },
+                          React.createElement('option', { value: '主线' }, '主线剧情'),
+                          React.createElement('option', { value: '支线' }, '支线任务'),
+                          React.createElement('option', { value: '日常' }, '日常副本')
+                        ),
+                        type !== '主线' ? React.createElement(
+                          'select',
+                          {
+                            value: parentId,
+                            onChange: e => setParentId(e.target.value),
+                            className: 'bg-slate-900 text-slate-300 border border-slate-700/60 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-slate-600 max-w-[150px]'
+                          },
+                          React.createElement('option', { value: '' }, '关联上级任务'),
+                          ...getTasks.filter(t => (type === '支线' ? t.type === '主线' : t.type === '支线')).map(t =>
+                            React.createElement('option', { key: t.id, value: t.id }, t.title)
+                          )
+                        ) : null,
+                        React.createElement('div', { className: 'ml-auto text-xs text-slate-400 font-mono whitespace-nowrap' }, `ENTROPY: ${String(entropy).padStart(2,'0')}%`)
                       ),
-                      type !== '主线' ? React.createElement(
-                        'select',
-                        {
-                          value: parentId,
-                          onChange: e => setParentId(e.target.value),
-                          className: 'bg-slate-900 text-slate-300 border border-slate-700/60 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-slate-600 max-w-[150px]'
-                        },
-                        React.createElement('option', { value: '' }, '关联上级任务'),
-                        ...getTasks.filter(t => (type === '支线' ? t.type === '主线' : t.type === '支线')).map(t =>
-                          React.createElement('option', { key: t.id, value: t.id }, t.title)
+                      React.createElement(
+                        'div',
+                        { className: 'flex gap-2' },
+                        React.createElement('input', {
+                          value: description,
+                          onChange: e => setDescription(e.target.value),
+                          placeholder: '任务详情 (可选)',
+                          className: 'flex-1 bg-slate-900 text-slate-300 placeholder-slate-500 border border-slate-700/60 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-slate-600'
+                        }),
+                        React.createElement(
+                          'button',
+                          { onClick: onAdd, className: 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 rounded-md px-4 py-2 whitespace-nowrap' },
+                          '录入'
                         )
-                      ) : null,
-                      React.createElement(
-                        'button',
-                        { onClick: onAdd, className: 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 rounded-md px-3 py-2' },
-                        '录入'
-                      ),
-                        React.createElement('div', { className: 'ml-auto text-xs text-slate-400 font-mono' }, `ENTROPY: ${String(entropy).padStart(2,'0')}%`)
-                      ),
+                      )
+                    ),
                     React.createElement(
                         'div',
                         { className: 'border border-slate-800 rounded-md' },
@@ -714,7 +730,10 @@
                                       item.type === '日常' ? React.createElement('span', { className: 'text-xs text-cyan-500 font-bold' }, '∞') : null,
                                       item.type === '支线' ? React.createElement('span', { className: 'text-xs text-emerald-500 font-mono' }, `⌛ ${formatHM(getTaskTotalTime(item.id))}`) : null
                                     ),
-                                    React.createElement('span', { className: 'text-slate-200 flex-1 truncate' }, item.title),
+                                    React.createElement('div', { className: 'flex-1 min-w-0 flex flex-col' },
+                                      React.createElement('span', { className: 'text-slate-200 truncate' }, item.title),
+                                      item.description ? React.createElement('span', { className: 'text-xs text-slate-500 truncate', title: item.description }, item.description) : null
+                                    ),
                                     item.type === '日常' ? (
                                       React.createElement(
                                         'button',
